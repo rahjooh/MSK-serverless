@@ -37,7 +37,7 @@ env:
   TF_VARS_FILE: ci.auto.tfvars
   TF_BACKEND_FILE: backend.auto.tfbackend
   AWS_REGION: ap-south-1
-  INFRA_SUMMARY_BUCKET: test-raw-bucket
+  INFRA_SUMMARY_BUCKET: test-raw-databucket
   INFRA_SUMMARY_KEY: terraform/cluster/resources.json
 
 jobs:
