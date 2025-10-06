@@ -5,42 +5,42 @@ cluster:
 
 iam:
   collector_role:
-    name: msk-crypto-iam_collector
+    name: msk-crypto-iam-collector
     description: "IAM role assumed by EC2 collectors publishing to MSK."
-    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/roles/msk-crypto-iam_collector"
+    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/roles/msk-crypto-iam-collector"
   instance_profile:
-    name: msk-crypto-iam_collector
+    name: msk-crypto-iam-collector
     description: "Instance profile attached to collector EC2 instances."
-    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/roles/msk-crypto-iam_collector"
+    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/roles/msk-crypto-iam-collector"
   control_plane_policy:
-    name: msk-crypto-iam_control
+    name: msk-crypto-iam-control
     description: "Policy allowing collectors to describe and obtain brokers."
-    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/policies/arn:aws:iam::640168415309:policy/msk-crypto-iam_control$permissions"
+    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/policies/arn:aws:iam::640168415309:policy/msk-crypto-iam-control$permissions"
   producer_policy:
-    name: msk-crypto-iam_producer
+    name: msk-crypto-iam-producer
     description: "Policy granting collectors write access to scoped Kafka topics."
-    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/policies/arn:aws:iam::640168415309:policy/msk-crypto-iam_producer$permissions"
+    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/policies/arn:aws:iam::640168415309:policy/msk-crypto-iam-producer$permissions"
   consumer_policy:
-    name: msk-crypto-iam_consumer
+    name: msk-crypto-iam-consumer
     description: "Reusable consumer policy for downstream teams."
-    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/policies/arn:aws:iam::640168415309:policy/msk-crypto-iam_consumer$permissions"
+    console_url: "https://console.aws.amazon.com/iam/home?region=ap-south-1#/policies/arn:aws:iam::640168415309:policy/msk-crypto-iam-consumer$permissions"
 
 security_groups:
   collector:
-    name: msk-sg_collectors
+    name: msk-crypto-sg-collectors
     description: "Security group assigned to producer EC2 collectors."
-    console_url: "https://console.aws.amazon.com/vpc/home?region=ap-south-1#SecurityGroups:search=msk-sg_collectors"
+    console_url: "https://console.aws.amazon.com/vpc/home?region=ap-south-1#SecurityGroups:search=msk-crypto-sg-collectors"
   consumer:
-    name: msk-sg_consumers
+    name: msk-crypto-sg-consumers
     description: "Security group referenced by consumer workloads."
-    console_url: "https://console.aws.amazon.com/vpc/home?region=ap-south-1#SecurityGroups:search=msk-sg_consumers"
+    console_url: "https://console.aws.amazon.com/vpc/home?region=ap-south-1#SecurityGroups:search=msk-crypto-sg-consumers"
   brokers:
-    name: msk-crypto-sg_brokers
+    name: msk-crypto-sg-brokers
     description: "Security group attached to MSK serverless brokers."
-    console_url: "https://console.aws.amazon.com/vpc/home?region=ap-south-1#SecurityGroups:search=msk-crypto-sg_brokers"
+    console_url: "https://console.aws.amazon.com/vpc/home?region=ap-south-1#SecurityGroups:search=msk-crypto-sg-brokers"
 
 cloudwatch:
   broker_log_group:
-    name: msk-crypto-cw-lg_broker
+    name: msk-crypto-cw-lg-broker
     description: "CloudWatch Logs group receiving broker logs."
-    console_url: "https://console.aws.amazon.com/cloudwatch/home?region=ap-south-1#logsV2:log-groups/log-group/msk-crypto-cw-lg_broker"
+    console_url: "https://console.aws.amazon.com/cloudwatch/home?region=ap-south-1#logsV2:log-groups/log-group/msk-crypto-cw-lg-broker"
