@@ -71,7 +71,9 @@ This stack is designed for **high-frequency, small messages** (e.g., order book 
 ```
 .
 ├── versions.tf          # Terraform & AWS provider constraints (>= 5.70)
-├── providers.tf         # AWS provider & default tags
+├── provider.tf          # AWS provider & default tags (role assumption)
+├── naming.tf            # Loads naming.yml and exposes canonical names
+├── naming.yml           # Source of truth for resource naming
 ├── variables.tf         # Input variables
 ├── main.tf              # MSK Serverless, SG rules, CloudWatch logs
 ├── iam.tf               # IAM roles/policies for producers & consumers
@@ -102,7 +104,7 @@ Key inputs you must set:
 - `region`: AWS region (e.g., `eu-west-1`)
 - `vpc_id`: VPC where MSK will live
 - `subnet_ids`: **2+** subnet IDs across different AZs (prefer private)
-- `cluster_name`: Friendly name (used in Kafka ARNs)
+- `cluster_name`: Optional override for the cluster name (defaults to `naming.yml`)
 - `producer_topic_prefixes`: Allowed topic name prefixes for producers (e.g., `["exchg.", "trades."]`)
 - `consumer_topic_prefixes`: Allowed topic name prefixes for consumers (e.g., `["exchg."]`)
 - `consumer_group_names`: Allowed consumer group names (exact match, e.g., `["team-quant"]`)
@@ -112,14 +114,16 @@ Key inputs you must set:
 - `access_scope`: ABAC tag value required by your organization (default `team-x`)
 - `pb_arn`: IAM permissions boundary ARN required for roles (default points to `MSK-Permission-Boundary`)
 
+### Naming (YAML)
+
+Resource names now live in [`naming.yml`](./naming.yml). Terraform loads the file via `yamldecode` (see `naming.tf`) and uses the `name` field for the MSK cluster, security groups, IAM resources, and the broker log group. Each entry also carries a short `description` plus an AWS Console `console_url` so teammates can jump directly to the resource. Override any entry by editing the YAML, or by supplying a variable (for example, `-var cluster_name=...`) when you need a one-off change. YAML values still pass through the same validation (`msk-` prefix for clusters, `msk_` prefix for security groups).
+
 ### Example `example.tfvars`
 
 ```hcl
 region     = "ap-south-1"
 vpc_id     = "vpc-0abc1234"
 subnet_ids = ["subnet-0aaa...", "subnet-0bbb..."]
-
-cluster_name  = "crypto-stream"
 
 producer_topic_prefixes = ["exchg.", "trades."]
 consumer_topic_prefixes = ["exchg."]

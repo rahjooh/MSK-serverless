@@ -1,6 +1,6 @@
 # CloudWatch log group for broker logs
 resource "aws_cloudwatch_log_group" "msk_broker" {
-  name              = "/aws/msk/${var.cluster_name}/broker"
+  name              = local.broker_log_group_name
   retention_in_days = var.log_retention_days
   kms_key_id        = var.log_kms_key_arn
 
@@ -9,7 +9,7 @@ resource "aws_cloudwatch_log_group" "msk_broker" {
 
 # --- Collector Security Group (for EC2 producers) ---
 resource "aws_security_group" "collector" {
-  name        = var.collector_sg_name
+  name        = local.collector_sg_name
   description = var.collector_sg_description
   vpc_id      = var.vpc_id
 
@@ -25,7 +25,7 @@ resource "aws_security_group" "collector" {
 
 # --- Consumer Security Group ---
 resource "aws_security_group" "consumers" {
-  name        = var.consumer_sg_name
+  name        = local.consumer_sg_name
   description = var.consumer_sg_description
   vpc_id      = var.vpc_id
 
@@ -34,7 +34,7 @@ resource "aws_security_group" "consumers" {
 
 # --- MSK Brokers Security Group ---
 resource "aws_security_group" "msk_brokers" {
-  name        = "${var.cluster_name}-msk-brokers"
+  name        = local.msk_broker_sg_name
   description = "MSK Serverless broker SG"
   vpc_id      = var.vpc_id
 
@@ -71,7 +71,7 @@ resource "aws_vpc_security_group_ingress_rule" "msk_iam_9098_from_consumers" {
 
 # --- MSK Serverless cluster ---
 resource "aws_msk_serverless_cluster" "this" {
-  cluster_name = var.cluster_name
+  cluster_name = local.cluster_name
 
   vpc_config {
     subnet_ids         = var.subnet_ids

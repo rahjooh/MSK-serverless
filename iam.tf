@@ -8,18 +8,18 @@ locals {
   # arn:aws:kafka:<region>:<acct>:topic/<cluster-name>/<uuid>/<topic>
   producer_topic_arns = [
     for p in var.producer_topic_prefixes :
-    "arn:aws:kafka:${local.region}:${local.account_id}:topic/${var.cluster_name}/${local.cluster_uuid}/${p}*"
+    "arn:aws:kafka:${local.region}:${local.account_id}:topic/${local.cluster_name}/${local.cluster_uuid}/${p}*"
   ]
 
   consumer_topic_arns = [
     for p in var.consumer_topic_prefixes :
-    "arn:aws:kafka:${local.region}:${local.account_id}:topic/${var.cluster_name}/${local.cluster_uuid}/${p}*"
+    "arn:aws:kafka:${local.region}:${local.account_id}:topic/${local.cluster_name}/${local.cluster_uuid}/${p}*"
   ]
 
   # arn:aws:kafka:<region>:<acct>:group/<cluster-name>/<uuid>/<group>
   consumer_group_arns = [
     for g in var.consumer_group_names :
-    "arn:aws:kafka:${local.region}:${local.account_id}:group/${var.cluster_name}/${local.cluster_uuid}/${g}"
+    "arn:aws:kafka:${local.region}:${local.account_id}:group/${local.cluster_name}/${local.cluster_uuid}/${g}"
   ]
 }
 
@@ -40,17 +40,16 @@ data "aws_iam_policy_document" "collector_assume" {
 }
 
 resource "aws_iam_role" "collector_role" {
-  name                 = "${var.cluster_name}-collector"
+  provider             = aws.untagged
+  name                 = local.collector_role_name
   assume_role_policy   = data.aws_iam_policy_document.collector_assume.json
   permissions_boundary = var.pb_arn
-
-  tags = merge(var.tags, { AccessScope = var.access_scope })
 }
 
 resource "aws_iam_instance_profile" "collector_profile" {
-  name = aws_iam_role.collector_role.name
-  role = aws_iam_role.collector_role.name
-  tags = merge(var.tags, { AccessScope = var.access_scope })
+  provider = aws.untagged
+  name     = local.collector_instance_profile_name
+  role     = aws_iam_role.collector_role.name
 }
 
 # Control-plane permissions (fetch bootstrap brokers, describe cluster)
@@ -67,10 +66,9 @@ data "aws_iam_policy_document" "msk_control_plane" {
 }
 
 resource "aws_iam_policy" "msk_control_plane" {
-  name   = "${var.cluster_name}-msk-control"
-  policy = data.aws_iam_policy_document.msk_control_plane.json
-
-  tags = merge(var.tags, { AccessScope = var.access_scope })
+  provider = aws.untagged
+  name     = local.msk_control_policy_name
+  policy   = data.aws_iam_policy_document.msk_control_plane.json
 }
 
 # Producer data-plane permissions
@@ -98,10 +96,9 @@ data "aws_iam_policy_document" "producer" {
 }
 
 resource "aws_iam_policy" "producer" {
-  name   = "${var.cluster_name}-producer"
-  policy = data.aws_iam_policy_document.producer.json
-
-  tags = merge(var.tags, { AccessScope = var.access_scope })
+  provider = aws.untagged
+  name     = local.producer_policy_name
+  policy   = data.aws_iam_policy_document.producer.json
 }
 
 resource "aws_iam_role_policy_attachment" "collector_control_attach" {
@@ -146,8 +143,7 @@ data "aws_iam_policy_document" "consumer" {
 }
 
 resource "aws_iam_policy" "consumer" {
-  name   = "${var.cluster_name}-consumer"
-  policy = data.aws_iam_policy_document.consumer.json
-
-  tags = merge(var.tags, { AccessScope = var.access_scope })
+  provider = aws.untagged
+  name     = local.consumer_policy_name
+  policy   = data.aws_iam_policy_document.consumer.json
 }
