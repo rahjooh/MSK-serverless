@@ -3,34 +3,35 @@ locals {
 
   cluster_name = coalesce(
     var.cluster_name,
-    try(local.naming_config.cluster.name, null)
+    try(local.naming_config.cluster.name, null),
+    "msk-crypto-cluster"
   )
 
   collector_sg_name = coalesce(
     var.collector_sg_name,
     try(local.naming_config.security_groups.collector.name, null),
-    "msk_collectors"
+    "msk-crypto-sg-collectors"
   )
 
   consumer_sg_name = coalesce(
     var.consumer_sg_name,
     try(local.naming_config.security_groups.consumer.name, null),
-    "msk_consumers"
+    "msk-crypto-sg-consumers"
   )
 
   msk_broker_sg_name = coalesce(
     try(local.naming_config.security_groups.brokers.name, null),
-    "${local.cluster_name}_brokers"
+    "msk-crypto-sg-brokers"
   )
 
   broker_log_group_name = coalesce(
     try(local.naming_config.cloudwatch.broker_log_group.name, null),
-    "${local.cluster_name}_broker"
+    "msk-crypto-cw-lg-broker"
   )
 
   collector_role_name = coalesce(
     try(local.naming_config.iam.collector_role.name, null),
-    "${local.cluster_name}_collector"
+    "msk-crypto-iam-collector"
   )
 
   collector_instance_profile_name = coalesce(
@@ -40,23 +41,16 @@ locals {
 
   msk_control_policy_name = coalesce(
     try(local.naming_config.iam.control_plane_policy.name, null),
-    "${local.cluster_name}_msk_control"
+    "msk-crypto-iam-control"
   )
 
   producer_policy_name = coalesce(
     try(local.naming_config.iam.producer_policy.name, null),
-    "${local.cluster_name}_producer"
+    "msk-crypto-iam-producer"
   )
 
   consumer_policy_name = coalesce(
     try(local.naming_config.iam.consumer_policy.name, null),
-    "${local.cluster_name}_consumer"
+    "msk-crypto-iam-consumer"
   )
-}
-
-# Validate naming conventions sourced from YAML/variables
-locals {
-  _cluster_name_validation = regex("^msk-[A-Za-z0-9-]+$", local.cluster_name)
-  _collector_sg_validation = regex("^msk[-_]", local.collector_sg_name)
-  _consumer_sg_validation  = regex("^msk[-_]", local.consumer_sg_name)
 }

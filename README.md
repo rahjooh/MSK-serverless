@@ -116,7 +116,7 @@ Key inputs you must set:
 
 ### Naming (YAML)
 
-Resource names now live in [`naming.yml`](./naming.yml). Terraform loads the file via `yamldecode` (see `naming.tf`) and uses the `name` field for the MSK cluster, security groups, IAM resources, and the broker log group. Each entry also carries a short `description` plus an AWS Console `console_url` so teammates can jump directly to the resource. Override any entry by editing the YAML, or by supplying a variable (for example, `-var cluster_name=...`) when you need a one-off change. YAML values still pass through the same validation (`msk-` prefix for clusters, `msk_` prefix for security groups).
+Resource names now live in [`naming.yml`](./naming.yml). Terraform loads the file via `yamldecode` (see `naming.tf`) and uses the `name` field for the MSK cluster, security groups, IAM resources, and the broker log group. Each entry also carries a short `description` plus an AWS Console `console_url` so teammates can jump directly to the resource. Override any entry by editing the YAML, or by supplying a variable (for example, `-var cluster_name=...`) when you need a one-off change.
 
 ### Example `example.tfvars`
 

@@ -31,11 +31,6 @@ variable "subnet_ids" {
 variable "cluster_name" {
   type    = string
   default = null
-
-  validation {
-    condition     = var.cluster_name == null || can(regex("^msk-[A-Za-z0-9-]+$", var.cluster_name))
-    error_message = "cluster_name must start with 'msk-' and may contain only letters, numbers, and hyphens."
-  }
 }
 
 variable "log_retention_days" {
@@ -68,11 +63,6 @@ variable "consumer_group_names" {
 variable "collector_sg_name" {
   type    = string
   default = null
-
-  validation {
-    condition     = var.collector_sg_name == null || startswith(var.collector_sg_name, "msk_")
-    error_message = "collector_sg_name must start with 'msk_'."
-  }
 }
 
 variable "collector_sg_description" {
@@ -83,11 +73,6 @@ variable "collector_sg_description" {
 variable "consumer_sg_name" {
   type    = string
   default = null
-
-  validation {
-    condition     = var.consumer_sg_name == null || startswith(var.consumer_sg_name, "msk_")
-    error_message = "consumer_sg_name must start with 'msk_'."
-  }
 }
 
 variable "consumer_sg_description" {
