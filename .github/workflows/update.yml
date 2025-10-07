@@ -2,52 +2,122 @@ name: Update Terraform state
 
 on:
   workflow_dispatch:
-    inputs:
-      tf_backend_bucket:
-        description: S3 bucket that stores the Terraform state file
-        required: true
-      tf_backend_key:
-        description: Object key inside the state bucket
-        required: true
-      tf_backend_region:
-        description: AWS region where the state bucket lives
-        required: true
-      dynamodb_table:
-        description: Optional DynamoDB table name for state locking
-        required: false
-        default: ''
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.6.6
+  TF_VARS_FILE: ci.auto.tfvars
+  TF_BACKEND_FILE: backend.auto.tfbackend
 
 jobs:
   update:
     name: Import existing AWS resources into Terraform state
     runs-on: ubuntu-latest
     env:
-      TF_BACKEND_BUCKET: ${{ github.event.inputs.tf_backend_bucket }}
-      TF_BACKEND_KEY: ${{ github.event.inputs.tf_backend_key }}
-      TF_BACKEND_REGION: ${{ github.event.inputs.tf_backend_region }}
-      TF_BACKEND_DYNAMODB_TABLE: ${{ github.event.inputs.dynamodb_table }}
-      TF_VAR_region: ${{ secrets.TF_VAR_REGION }}
-      TF_VAR_vpc_id: ${{ secrets.TF_VAR_VPC_ID }}
-      TF_VAR_subnet_ids: ${{ secrets.TF_VAR_SUBNET_IDS }}
-      TF_VAR_assume_role_arn: ${{ secrets.TF_VAR_ASSUME_ROLE_ARN }}
-      TF_VAR_log_kms_key_arn: ${{ secrets.TF_VAR_LOG_KMS_KEY_ARN }}
-      TF_VAR_collector_sg_name: ${{ secrets.TF_VAR_COLLECTOR_SG_NAME }}
-      TF_VAR_consumer_sg_name: ${{ secrets.TF_VAR_CONSUMER_SG_NAME }}
-      TF_VAR_cluster_name: ${{ secrets.TF_VAR_CLUSTER_NAME }}
-      TF_VAR_tags: ${{ secrets.TF_VAR_TAGS_JSON }}
-      TF_VAR_producer_topic_prefixes: ${{ secrets.TF_VAR_PRODUCER_TOPIC_PREFIXES }}
-      TF_VAR_consumer_topic_prefixes: ${{ secrets.TF_VAR_CONSUMER_TOPIC_PREFIXES }}
-      TF_VAR_consumer_group_names: ${{ secrets.TF_VAR_CONSUMER_GROUP_NAMES }}
-      TF_VAR_collector_sg_egress_cidrs: ${{ secrets.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS }}
+      TF_VAR_region: ${{ secrets.TF_VAR_REGION || vars.TF_VAR_REGION || '' }}
+      TF_VAR_vpc_id: ${{ secrets.TF_VAR_VPC_ID || vars.TF_VAR_VPC_ID || '' }}
+      TF_VAR_subnet_ids: ${{ secrets.TF_VAR_SUBNET_IDS || vars.TF_VAR_SUBNET_IDS || '' }}
+      TF_VAR_assume_role_arn: ${{ secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
+      TF_VAR_log_kms_key_arn: ${{ secrets.TF_VAR_LOG_KMS_KEY_ARN || vars.TF_VAR_LOG_KMS_KEY_ARN || '' }}
+      TF_VAR_collector_sg_name: ${{ secrets.TF_VAR_COLLECTOR_SG_NAME || vars.TF_VAR_COLLECTOR_SG_NAME || '' }}
+      TF_VAR_consumer_sg_name: ${{ secrets.TF_VAR_CONSUMER_SG_NAME || vars.TF_VAR_CONSUMER_SG_NAME || '' }}
+      TF_VAR_cluster_name: ${{ secrets.TF_VAR_CLUSTER_NAME || vars.TF_VAR_CLUSTER_NAME || '' }}
+      TF_VAR_tags: ${{ secrets.TF_VAR_TAGS_JSON || vars.TF_VAR_TAGS_JSON || '' }}
+      TF_VAR_producer_topic_prefixes: ${{ secrets.TF_VAR_PRODUCER_TOPIC_PREFIXES || vars.TF_VAR_PRODUCER_TOPIC_PREFIXES || '' }}
+      TF_VAR_consumer_topic_prefixes: ${{ secrets.TF_VAR_CONSUMER_TOPIC_PREFIXES || vars.TF_VAR_CONSUMER_TOPIC_PREFIXES || '' }}
+      TF_VAR_consumer_group_names: ${{ secrets.TF_VAR_CONSUMER_GROUP_NAMES || vars.TF_VAR_CONSUMER_GROUP_NAMES || '' }}
+      TF_VAR_collector_sg_egress_cidrs: ${{ secrets.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS || vars.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Resolve runtime configuration
+        run: |
+          {
+            echo "TFVARS_CONTENT<<EOF";
+            echo "${TFVARS}";
+            echo "EOF";
+            echo "TF_BACKEND_CONTENT<<EOF";
+            echo "${TF_BACKEND_CONFIG}";
+            echo "EOF";
+            EFFECTIVE_REGION="${AWS_REGION_INPUT:-${TF_VAR_region}}";
+            echo "AWS_REGION<<EOF";
+            echo "${EFFECTIVE_REGION}";
+            echo "EOF";
+            echo "AWS_REGION_EFFECTIVE<<EOF";
+            echo "${EFFECTIVE_REGION}";
+            echo "EOF";
+          } >> "$GITHUB_ENV"
+        env:
+          TFVARS: ${{ secrets.TERRAFORM_TFVARS || '' }}
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG || vars.TF_BACKEND_CONFIG || '' }}
+          AWS_REGION_INPUT: ${{ secrets.AWS_REGION || vars.AWS_REGION || '' }}
+
+      - name: Materialize tfvars from secret
+        if: ${{ env.TFVARS_CONTENT != '' }}
+        run: |
+          printf '%s\n' "${TFVARS_CONTENT}" > "${TF_VARS_FILE}"
+
+      - name: Materialize backend config from secret
+        if: ${{ env.TF_BACKEND_CONTENT != '' }}
+        run: |
+          printf '%s\n' "${TF_BACKEND_CONTENT}" > "${TF_BACKEND_FILE}"
+
+      - name: Export backend settings
+        if: ${{ env.TF_BACKEND_CONTENT != '' }}
+        run: |
+          python <<'PY'
+          import os
+          import sys
+
+          path = os.environ.get("TF_BACKEND_FILE")
+          if not path or not os.path.isfile(path):
+              sys.exit(0)
+
+          data = {}
+          with open(path, encoding="utf-8") as fh:
+              for raw_line in fh:
+                  line = raw_line.strip()
+                  if not line or line.startswith("#"):
+                      continue
+                  if "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  key = key.strip()
+                  value = value.strip().strip('"')
+                  data[key] = value
+
+          mapping = {
+              "bucket": "TF_BACKEND_BUCKET",
+              "key": "TF_BACKEND_KEY",
+              "region": "TF_BACKEND_REGION",
+              "dynamodb_table": "TF_BACKEND_DYNAMODB_TABLE",
+          }
+
+          github_env = os.environ["GITHUB_ENV"]
+          with open(github_env, "a", encoding="utf-8") as env_file:
+              for source, target in mapping.items():
+                  value = data.get(source)
+                  if value:
+                      env_file.write(f"{target}={value}\n")
+          PY
+        env:
+          TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
-          aws-region: ${{ env.TF_VAR_region }}
+          aws-region: ${{ env.AWS_REGION_EFFECTIVE }}
           role-duration-seconds: 3600
 
       - name: Setup Terraform
