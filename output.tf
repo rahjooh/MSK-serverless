@@ -24,7 +24,7 @@ locals {
     }
     security_groups = {
       collectors = {
-        id   = coalesce(
+        id  = coalesce(
           try(aws_security_group.collector[0].id, null),
           try(data.aws_security_group.existing_collector[0].id, null)
         )
@@ -38,7 +38,7 @@ locals {
         )
       }
       consumers = {
-        id   = coalesce(
+        id = coalesce(
           try(aws_security_group.consumers[0].id, null),
           try(data.aws_security_group.existing_consumers[0].id, null)
         )
