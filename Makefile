@@ -20,7 +20,7 @@ export VPC_ID ?= vpc-088763652e22bcc79
 export TF_IN_AUTOMATION = 1
 export TF_INPUT = 0
 
-.PHONY: help init fmt validate plan apply plan-destroy destroy import-msk import-msk-auto import-support-resources refresh-state state-pull clean import force-destroy
+.PHONY: help init fmt validate plan apply plan-destroy destroy import-msk import-msk-auto import-support-resources refresh-state state-pull clean import force-destroy rebuild-tfstate
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*##"} {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -208,3 +208,7 @@ force-destroy: ## Force delete MSK stack resources directly via AWS CLI (ignores
 	 echo "[force-destroy] Completed best-effort cleanup"
 import: import-msk-auto import-support-resources ## Import MSK cluster plus supporting resources (defaults set in Makefile)
 	@echo "Imports complete."
+
+
+rebuild-tfstate: ## Rebuild remote Terraform state by importing existing AWS resources
+	./scripts/rebuild-tfstate.sh
