@@ -9,25 +9,61 @@ locals {
       tags                       = aws_msk_serverless_cluster.this.tags
     }
     cloudwatch = {
-      log_group_name = aws_cloudwatch_log_group.msk_broker.name
-      log_group_arn  = aws_cloudwatch_log_group.msk_broker.arn
-      retention_days = aws_cloudwatch_log_group.msk_broker.retention_in_days
+      log_group_name = coalesce(
+        try(aws_cloudwatch_log_group.msk_broker[0].name, null),
+        try(data.aws_cloudwatch_log_group.existing_msk_broker[0].name, null)
+      )
+      log_group_arn = coalesce(
+        try(aws_cloudwatch_log_group.msk_broker[0].arn, null),
+        try(data.aws_cloudwatch_log_group.existing_msk_broker[0].arn, null)
+      )
+      retention_days = coalesce(
+        try(aws_cloudwatch_log_group.msk_broker[0].retention_in_days, null),
+        try(data.aws_cloudwatch_log_group.existing_msk_broker[0].retention_in_days, null)
+      )
     }
     security_groups = {
       collectors = {
-        id   = aws_security_group.collector.id
-        arn  = aws_security_group.collector.arn
-        tags = aws_security_group.collector.tags
+        id   = coalesce(
+          try(aws_security_group.collector[0].id, null),
+          try(data.aws_security_group.existing_collector[0].id, null)
+        )
+        arn = coalesce(
+          try(aws_security_group.collector[0].arn, null),
+          try(data.aws_security_group.existing_collector[0].arn, null)
+        )
+        tags = coalesce(
+          try(aws_security_group.collector[0].tags, null),
+          try(data.aws_security_group.existing_collector[0].tags, null)
+        )
       }
       consumers = {
-        id   = aws_security_group.consumers.id
-        arn  = aws_security_group.consumers.arn
-        tags = aws_security_group.consumers.tags
+        id   = coalesce(
+          try(aws_security_group.consumers[0].id, null),
+          try(data.aws_security_group.existing_consumers[0].id, null)
+        )
+        arn = coalesce(
+          try(aws_security_group.consumers[0].arn, null),
+          try(data.aws_security_group.existing_consumers[0].arn, null)
+        )
+        tags = coalesce(
+          try(aws_security_group.consumers[0].tags, null),
+          try(data.aws_security_group.existing_consumers[0].tags, null)
+        )
       }
       msk_brokers = {
-        id   = aws_security_group.msk_brokers.id
-        arn  = aws_security_group.msk_brokers.arn
-        tags = aws_security_group.msk_brokers.tags
+        id   = coalesce(
+          try(aws_security_group.msk_brokers[0].id, null),
+          try(data.aws_security_group.existing_msk_brokers[0].id, null)
+        )
+        arn = coalesce(
+          try(aws_security_group.msk_brokers[0].arn, null),
+          try(data.aws_security_group.existing_msk_brokers[0].arn, null)
+        )
+        tags = coalesce(
+          try(aws_security_group.msk_brokers[0].tags, null),
+          try(data.aws_security_group.existing_msk_brokers[0].tags, null)
+        )
       }
       ingress_rules = [
         {
@@ -62,14 +98,14 @@ locals {
     iam = {
       roles = {
         collector = {
-          name = aws_iam_role.collector_role.name
-          arn  = aws_iam_role.collector_role.arn
+          name = local.collector_role_resolved_name
+          arn  = local.collector_role_resolved_arn
         }
       }
       instance_profiles = {
         collector = {
-          name = aws_iam_instance_profile.collector_profile.name
-          arn  = aws_iam_instance_profile.collector_profile.arn
+          name = local.collector_instance_profile_resolved_name
+          arn  = local.collector_instance_profile_resolved_arn
         }
       }
       policies = {
@@ -116,12 +152,15 @@ output "bootstrap_brokers_sasl_iam" {
 }
 
 output "msk_broker_security_group_id" {
-  value       = aws_security_group.msk_brokers.id
+  value       = coalesce(
+    try(aws_security_group.msk_brokers[0].id, null),
+    try(data.aws_security_group.existing_msk_brokers[0].id, null)
+  )
   description = "Security group ID for MSK brokers"
 }
 
 output "collector_instance_profile_name" {
-  value       = aws_iam_instance_profile.collector_profile.name
+  value       = local.collector_instance_profile_resolved_name
   description = "Attach this instance profile to your EC2 collectors"
 }
 
@@ -131,12 +170,18 @@ output "consumer_policy_arn" {
 }
 
 output "collector_sg_id" {
-  value       = aws_security_group.collector.id
+  value       = coalesce(
+    try(aws_security_group.collector[0].id, null),
+    try(data.aws_security_group.existing_collector[0].id, null)
+  )
   description = "Security Group ID created for EC2 collectors"
 }
 
 output "consumer_sg_id" {
-  value       = aws_security_group.consumers.id
+  value       = coalesce(
+    try(aws_security_group.consumers[0].id, null),
+    try(data.aws_security_group.existing_consumers[0].id, null)
+  )
   description = "Security Group ID created for MSK consumers"
 }
 

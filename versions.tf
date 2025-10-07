@@ -10,4 +10,7 @@ terraform {
       version = ">= 2.5.1"
     }
   }
+    backend "s3" {
+    encrypt = true
+  }
 }

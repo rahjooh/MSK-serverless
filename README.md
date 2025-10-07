@@ -113,6 +113,7 @@ Key inputs you must set:
 - `tags`: Map of default tags for all resources
 - `access_scope`: ABAC tag value required by your organization (default `team-x`)
 - `pb_arn`: IAM permissions boundary ARN required for roles (default points to `MSK-Permission-Boundary`)
+- `existing_*`: Optional overrides to reuse pre-existing infrastructure (log group, security groups, IAM role/profile)
 
 ### Naming (YAML)
 
@@ -141,12 +142,20 @@ tags = {
 ## How to deploy
 
 ```bash
-terraform init -upgrade
+terraform init -upgrade \
+  -backend-config="bucket=<your-state-bucket>" \
+  -backend-config="key=<your/prefix>/terraform.tfstate" \
+  -backend-config="region=<bucket-region>"
 terraform fmt -recursive
 terraform validate
 terraform plan -var-file=example.tfvars
 terraform apply -var-file=example.tfvars
 ```
+
+> **Remote state**: Terraform now uses an encrypted S3 backend. Supply your own bucket, prefix, and region via
+> `terraform init -backend-config=...` (as shown above). The repository's `.gitignore` excludes local `terraform.tfstate`
+> files so state is only stored in S3 (enable bucket versioning to keep history/backups). Use `terraform state pull` when you
+> need a local copy for inspection.
 
 ### Assuming the `MSK-Builder` role
 
@@ -217,6 +226,23 @@ The `.github/workflows/terraform.yml` pipeline implements the guidance above wit
 | `destroy` | Provides an on-demand teardown path that requires the same approvals as apply. |
 
 To feed environment-specific variables, store an HCL snippet in the `TERRAFORM_TFVARS` secret (for example, the contents of your `example.tfvars`) so each job can materialize a temporary `ci.auto.tfvars` at runtime. Set `AWS_ROLE_ARN`/`AWS_REGION` secrets (or environment-level equivalents) to let the workflow assume the correct IAM role via GitHub’s OIDC federation.
+
+### Rebuilding state after corruption
+
+If the remote Terraform state stored in S3 is ever lost or corrupted, trigger the on-demand workflow defined in [`rebuild-tfstate.yml`](.github/workflows/rebuild-tfstate.yml). The job calls [`scripts/rebuild-tfstate.sh`](./scripts/rebuild-tfstate.sh) which:
+
+1. Initializes Terraform against the provided backend bucket/key (plus optional DynamoDB lock table).
+2. Discovers the canonical resource names from `naming.yml` and any variable overrides provided via `TF_VAR_*` environment variables.
+3. Uses the AWS CLI to look up the live MSK cluster, security groups, CloudWatch log group, and IAM artifacts that this stack manages.
+4. Imports each resource into the backend state and performs a refresh-only apply followed by a plan for validation.
+
+To run the workflow:
+
+- Store the AWS federation role to assume in the `AWS_ASSUME_ROLE_ARN` secret (or update the workflow to suit your credential model).
+- Provide the minimum required Terraform variables as repository/environment secrets so the importer can evaluate the configuration—specifically `TF_VAR_REGION`, `TF_VAR_VPC_ID`, and `TF_VAR_SUBNET_IDS` (encoded as a JSON array, e.g. `["subnet-123","subnet-456"]`). Optional overrides such as custom names or tags can also be supplied via the corresponding `TF_VAR_*` secrets shown in the workflow.
+- From the Actions tab choose **Rebuild Terraform state**, supply the S3 bucket, object key, backend region, and (optionally) the DynamoDB table used for state locking, then start the run.
+
+> The importer is idempotent: rerunning it simply reaffirms the existing mappings. Always review the terminal plan output before resuming regular Terraform changes to confirm no drift remains.
 
 ---
 
@@ -296,6 +322,9 @@ General Kafka settings that work well for **small, frequent messages**:
 ---
 
 ## Troubleshooting
+
+- **Terraform reports resources already exist**
+  - Re-run Terraform with the matching `existing_*` variables set (for example `existing_broker_log_group_name`, `existing_msk_broker_security_group_id`, or `existing_collector_role_name`) so the module reuses the pre-existing resources instead of creating new ones.
 
 - **Invalid single-argument block** (HCL)
   - Don’t use single-line blocks with multiple attributes. Use multi-line syntax:

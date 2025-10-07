@@ -89,3 +89,40 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+# Existing infrastructure reuse (set these to avoid creating duplicates)
+variable "existing_broker_log_group_name" {
+  description = "Name of an existing CloudWatch Log Group for broker logs. When set, the module will reuse it instead of creating a new one."
+  type        = string
+  default     = null
+}
+
+variable "existing_collector_security_group_id" {
+  description = "ID of an existing security group for EC2 collectors. When set, creation of a new collector security group is skipped."
+  type        = string
+  default     = null
+}
+
+variable "existing_consumer_security_group_id" {
+  description = "ID of an existing security group for MSK consumers. When set, creation of a new consumer security group is skipped."
+  type        = string
+  default     = null
+}
+
+variable "existing_msk_broker_security_group_id" {
+  description = "ID of an existing security group attached to MSK brokers. When set, creation of a new broker security group is skipped."
+  type        = string
+  default     = null
+}
+
+variable "existing_collector_role_name" {
+  description = "Name of an existing IAM role for EC2 collectors. When set, the module reuses the role instead of creating a new one."
+  type        = string
+  default     = null
+}
+
+variable "existing_collector_instance_profile_name" {
+  description = "Name of an existing IAM instance profile for EC2 collectors. When set, the module reuses it instead of creating a new one."
+  type        = string
+  default     = null
+}
