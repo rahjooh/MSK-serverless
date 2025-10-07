@@ -24,11 +24,11 @@ locals {
     }
     security_groups = {
       collectors = {
-        id  = coalesce(
+        id   = coalesce(
           try(aws_security_group.collector[0].id, null),
           try(data.aws_security_group.existing_collector[0].id, null)
         )
-        arn = coalesce(
+        arn  = coalesce(
           try(aws_security_group.collector[0].arn, null),
           try(data.aws_security_group.existing_collector[0].arn, null)
         )
@@ -38,11 +38,11 @@ locals {
         )
       }
       consumers = {
-        id = coalesce(
+        id   = coalesce(
           try(aws_security_group.consumers[0].id, null),
           try(data.aws_security_group.existing_consumers[0].id, null)
         )
-        arn = coalesce(
+        arn  = coalesce(
           try(aws_security_group.consumers[0].arn, null),
           try(data.aws_security_group.existing_consumers[0].arn, null)
         )
@@ -56,7 +56,7 @@ locals {
           try(aws_security_group.msk_brokers[0].id, null),
           try(data.aws_security_group.existing_msk_brokers[0].id, null)
         )
-        arn = coalesce(
+        arn  = coalesce(
           try(aws_security_group.msk_brokers[0].arn, null),
           try(data.aws_security_group.existing_msk_brokers[0].arn, null)
         )
