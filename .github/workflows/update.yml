@@ -1,4 +1,4 @@
-name: Rebuild Terraform state
+name: Update Terraform state
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ on:
         default: ''
 
 jobs:
-  rebuild:
+  update:
     name: Import existing AWS resources into Terraform state
     runs-on: ubuntu-latest
     env:
@@ -58,5 +58,5 @@ jobs:
       - name: Show Terraform version
         run: terraform version
 
-      - name: Rebuild remote Terraform state
+      - name: Update remote Terraform state
         run: ./scripts/rebuild-tfstate.sh

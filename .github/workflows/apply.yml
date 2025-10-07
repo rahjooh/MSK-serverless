@@ -1,0 +1,158 @@
+name: Terraform Apply
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.6.6
+  TF_WORKING_DIR: .
+  PLAN_FILE: plan.out
+  TF_VARS_FILE: ci.auto.tfvars
+  TF_BACKEND_FILE: backend.auto.tfbackend
+  AWS_REGION: ap-south-1
+  INFRA_SUMMARY_BUCKET: test-raw-databucket
+  INFRA_SUMMARY_KEY: terraform/cluster/resources.json
+
+jobs:
+  apply:
+    name: Apply infrastructure
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Resolve runtime configuration
+        run: |
+          {
+            echo "ASSUME_ROLE_ARN<<EOF";
+            echo "${ASSUME_ROLE_ARN}";
+            echo "EOF";
+            echo "AWS_REGION_EFFECTIVE<<EOF";
+            echo "${AWS_REGION_INPUT}";
+            echo "EOF";
+            echo "TFVARS_CONTENT<<EOF";
+            echo "${TFVARS}";
+            echo "EOF";
+            echo "TF_BACKEND_CONTENT<<EOF";
+            echo "${TF_BACKEND_CONFIG}";
+            echo "EOF";
+            echo "AWS_ACCESS_KEY_ID<<EOF";
+            echo "${AWS_ACCESS_KEY_ID_INPUT}";
+            echo "EOF";
+            echo "AWS_SECRET_ACCESS_KEY<<EOF";
+            echo "${AWS_SECRET_ACCESS_KEY_INPUT}";
+            echo "EOF";
+            echo "AWS_SESSION_TOKEN<<EOF";
+            echo "${AWS_SESSION_TOKEN_INPUT}";
+            echo "EOF";
+            echo "AWS_DEFAULT_REGION<<EOF";
+            echo "${AWS_REGION_INPUT}";
+            echo "EOF";
+          } >> "$GITHUB_ENV"
+        env:
+          ASSUME_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN || '' }}
+          AWS_REGION_INPUT: ${{ secrets.AWS_REGION || vars.AWS_REGION || env.AWS_REGION }}
+          TFVARS: ${{ secrets.TERRAFORM_TFVARS || '' }}
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG || vars.TF_BACKEND_CONFIG || '' }}
+          AWS_ACCESS_KEY_ID_INPUT: ${{ secrets.AWS_ACCESS_KEY_ID || '' }}
+          AWS_SECRET_ACCESS_KEY_INPUT: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          AWS_SESSION_TOKEN_INPUT: ${{ secrets.AWS_SESSION_TOKEN || '' }}
+
+      - name: Materialize tfvars from secret
+        if: ${{ env.TFVARS_CONTENT != '' }}
+        run: |
+          printf '%s\n' "${TFVARS_CONTENT}" > "${TF_VARS_FILE}"
+        env:
+          TFVARS_CONTENT: ${{ env.TFVARS_CONTENT }}
+          TF_VARS_FILE: ${{ env.TF_VARS_FILE }}
+
+      - name: Materialize backend config from secrets/vars
+        if: ${{ env.TF_BACKEND_CONTENT != '' }}
+        run: |
+          printf '%s\n' "${TF_BACKEND_CONTENT}" > "${TF_BACKEND_FILE}"
+        env:
+          TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
+          TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+
+      - name: Terraform init
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false
+
+      - name: Terraform plan
+        run: |
+          if [ -f "${{ env.TF_VARS_FILE }}" ]; then
+            terraform -chdir=${{ env.TF_WORKING_DIR }} plan -input=false -out="${{ env.PLAN_FILE }}" -var-file="${{ env.TF_VARS_FILE }}"
+          else
+            terraform -chdir=${{ env.TF_WORKING_DIR }} plan -input=false -out="${{ env.PLAN_FILE }}"
+          fi
+
+      - name: Terraform apply
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} apply -input=false -auto-approve "${{ env.PLAN_FILE }}"
+
+      - name: Save infrastructure summary
+        run: terraform -chdir=${{ env.TF_WORKING_DIR }} output -json infrastructure_summary_json > resources.json
+
+      - name: Upload infrastructure summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: infra-summary
+          path: resources.json
+
+      - name: Publish summary to S3
+        if: ${{ env.INFRA_SUMMARY_BUCKET != '' && env.INFRA_SUMMARY_KEY != '' }}
+        run: aws s3 cp resources.json "s3://${{ env.INFRA_SUMMARY_BUCKET }}/${{ env.INFRA_SUMMARY_KEY }}"
+
+      - name: Capture outputs
+        run: |
+          terraform -chdir=${{ env.TF_WORKING_DIR }} output -json > terraform-outputs.json
+          terraform -chdir=${{ env.TF_WORKING_DIR }} output > terraform-outputs.txt
+
+      - name: Upload outputs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs
+          path: |
+            terraform-outputs.json
+            terraform-outputs.txt
+
+  report:
+    name: Report created infrastructure
+    runs-on: ubuntu-latest
+    needs: apply
+    if: ${{ needs.apply.result == 'success' }}
+    steps:
+      - name: Download outputs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-outputs
+          path: .
+
+      - name: Publish outputs to summary
+        run: |
+          {
+            echo '### Terraform Outputs';
+            echo '';
+            cat terraform-outputs.txt;
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload outputs as job artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-outputs-report
+          path: |
+            terraform-outputs.json
+            terraform-outputs.txt
