@@ -1,0 +1,62 @@
+name: Rebuild Terraform state
+
+on:
+  workflow_dispatch:
+    inputs:
+      tf_backend_bucket:
+        description: S3 bucket that stores the Terraform state file
+        required: true
+      tf_backend_key:
+        description: Object key inside the state bucket
+        required: true
+      tf_backend_region:
+        description: AWS region where the state bucket lives
+        required: true
+      dynamodb_table:
+        description: Optional DynamoDB table name for state locking
+        required: false
+        default: ''
+
+jobs:
+  rebuild:
+    name: Import existing AWS resources into Terraform state
+    runs-on: ubuntu-latest
+    env:
+      TF_BACKEND_BUCKET: ${{ github.event.inputs.tf_backend_bucket }}
+      TF_BACKEND_KEY: ${{ github.event.inputs.tf_backend_key }}
+      TF_BACKEND_REGION: ${{ github.event.inputs.tf_backend_region }}
+      TF_BACKEND_DYNAMODB_TABLE: ${{ github.event.inputs.dynamodb_table }}
+      TF_VAR_region: ${{ secrets.TF_VAR_REGION }}
+      TF_VAR_vpc_id: ${{ secrets.TF_VAR_VPC_ID }}
+      TF_VAR_subnet_ids: ${{ secrets.TF_VAR_SUBNET_IDS }}
+      TF_VAR_assume_role_arn: ${{ secrets.TF_VAR_ASSUME_ROLE_ARN }}
+      TF_VAR_log_kms_key_arn: ${{ secrets.TF_VAR_LOG_KMS_KEY_ARN }}
+      TF_VAR_collector_sg_name: ${{ secrets.TF_VAR_COLLECTOR_SG_NAME }}
+      TF_VAR_consumer_sg_name: ${{ secrets.TF_VAR_CONSUMER_SG_NAME }}
+      TF_VAR_cluster_name: ${{ secrets.TF_VAR_CLUSTER_NAME }}
+      TF_VAR_tags: ${{ secrets.TF_VAR_TAGS_JSON }}
+      TF_VAR_producer_topic_prefixes: ${{ secrets.TF_VAR_PRODUCER_TOPIC_PREFIXES }}
+      TF_VAR_consumer_topic_prefixes: ${{ secrets.TF_VAR_CONSUMER_TOPIC_PREFIXES }}
+      TF_VAR_consumer_group_names: ${{ secrets.TF_VAR_CONSUMER_GROUP_NAMES }}
+      TF_VAR_collector_sg_egress_cidrs: ${{ secrets.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.TF_VAR_region }}
+          role-duration-seconds: 3600
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.6
+
+      - name: Show Terraform version
+        run: terraform version
+
+      - name: Rebuild remote Terraform state
+        run: ./scripts/rebuild-tfstate.sh
