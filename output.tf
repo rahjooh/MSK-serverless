@@ -24,11 +24,11 @@ locals {
     }
     security_groups = {
       collectors = {
-        id   = coalesce(
+        id = coalesce(
           try(aws_security_group.collector[0].id, null),
           try(data.aws_security_group.existing_collector[0].id, null)
         )
-        arn  = coalesce(
+        arn = coalesce(
           try(aws_security_group.collector[0].arn, null),
           try(data.aws_security_group.existing_collector[0].arn, null)
         )
@@ -38,11 +38,11 @@ locals {
         )
       }
       consumers = {
-        id   = coalesce(
+        id = coalesce(
           try(aws_security_group.consumers[0].id, null),
           try(data.aws_security_group.existing_consumers[0].id, null)
         )
-        arn  = coalesce(
+        arn = coalesce(
           try(aws_security_group.consumers[0].arn, null),
           try(data.aws_security_group.existing_consumers[0].arn, null)
         )
@@ -52,11 +52,11 @@ locals {
         )
       }
       msk_brokers = {
-        id   = coalesce(
+        id = coalesce(
           try(aws_security_group.msk_brokers[0].id, null),
           try(data.aws_security_group.existing_msk_brokers[0].id, null)
         )
-        arn  = coalesce(
+        arn = coalesce(
           try(aws_security_group.msk_brokers[0].arn, null),
           try(data.aws_security_group.existing_msk_brokers[0].arn, null)
         )
@@ -152,7 +152,7 @@ output "bootstrap_brokers_sasl_iam" {
 }
 
 output "msk_broker_security_group_id" {
-  value       = coalesce(
+  value = coalesce(
     try(aws_security_group.msk_brokers[0].id, null),
     try(data.aws_security_group.existing_msk_brokers[0].id, null)
   )
@@ -170,7 +170,7 @@ output "consumer_policy_arn" {
 }
 
 output "collector_sg_id" {
-  value       = coalesce(
+  value = coalesce(
     try(aws_security_group.collector[0].id, null),
     try(data.aws_security_group.existing_collector[0].id, null)
   )
@@ -178,7 +178,7 @@ output "collector_sg_id" {
 }
 
 output "consumer_sg_id" {
-  value       = coalesce(
+  value = coalesce(
     try(aws_security_group.consumers[0].id, null),
     try(data.aws_security_group.existing_consumers[0].id, null)
   )
