@@ -21,6 +21,7 @@ jobs:
       TF_VAR_vpc_id: ${{ secrets.TF_VAR_VPC_ID || vars.TF_VAR_VPC_ID || '' }}
       TF_VAR_subnet_ids: ${{ secrets.TF_VAR_SUBNET_IDS || vars.TF_VAR_SUBNET_IDS || '' }}
       TF_VAR_assume_role_arn: ${{ secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
+      AWS_ASSUME_ROLE_ARN: ${{ secrets.AWS_ASSUME_ROLE_ARN || secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
       TF_VAR_log_kms_key_arn: ${{ secrets.TF_VAR_LOG_KMS_KEY_ARN || vars.TF_VAR_LOG_KMS_KEY_ARN || '' }}
       TF_VAR_collector_sg_name: ${{ secrets.TF_VAR_COLLECTOR_SG_NAME || vars.TF_VAR_COLLECTOR_SG_NAME || '' }}
       TF_VAR_consumer_sg_name: ${{ secrets.TF_VAR_CONSUMER_SG_NAME || vars.TF_VAR_CONSUMER_SG_NAME || '' }}
@@ -114,12 +115,19 @@ jobs:
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
 
-      - name: Configure AWS credentials
+     - name: Configure AWS credentials
+        if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ASSUME_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ASSUME_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION_EFFECTIVE }}
           role-duration-seconds: 3600
+
+      - name: Validate AWS credential configuration
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}
+        run: |
+          echo "::error::AWS_ASSUME_ROLE_ARN is not configured. Please set the AWS_ASSUME_ROLE_ARN secret or reuse TF_VAR_ASSUME_ROLE_ARN."
+          exit 1
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2

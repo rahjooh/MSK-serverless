@@ -159,14 +159,14 @@ terraform apply -var-file=example.tfvars
 
 ### Assuming the `MSK-Builder` role
 
-By default the provider uses whatever AWS identity is active when you run Terraform. If you need Terraform to assume `arn:aws:iam::640168415309:role/MSK-Builder`, set `assume_role_arn` in your `.tfvars` (or via CLI variables). Otherwise leave it `null` and authenticate ahead of time (for example with `AWS_PROFILE=msk-builder`).
+By default the provider uses whatever AWS identity is active when you run Terraform. If you need Terraform to assume `arn:aws:iam::61..:role/MSK-Builder`, set `assume_role_arn` in your `.tfvars` (or via CLI variables). Otherwise leave it `null` and authenticate ahead of time (for example with `AWS_PROFILE=msk-builder`).
 
 One convenient CLI profile that handles the MFA prompt and role chaining:
 
 ```ini
 [profile msk-builder]
 region = ap-south-1
-role_arn = arn:aws:iam::640168415309:role/MSK-Builder
+role_arn = arn:aws:iam::64..:role/MSK-Builder
 source_profile = hadi
 ```
 
