@@ -65,6 +65,7 @@ jobs:
         if: ${{ env.TFVARS_CONTENT != '' }}
         run: |
           printf '%s\n' "${TFVARS_CONTENT}" > "${TF_VARS_FILE}"
+          terraform fmt "${TF_VARS_FILE}"
 
       - name: Materialize backend config from secret
         if: ${{ env.TF_BACKEND_CONTENT != '' }}
