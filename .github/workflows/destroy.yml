@@ -88,9 +88,153 @@ jobs:
         env:
           TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+          
+      - name: Export configuration for state rebuild script
+              run: |
+                python3 <<'PY' >> "$GITHUB_ENV"
+      import ast
+      import json
+      import os
+      import re
+
+      def parse_assignments(path, allowed):
+          result = {}
+          if not path or not os.path.exists(path):
+              return result
+          with open(path, 'r', encoding='utf-8') as handle:
+              lines = handle.readlines()
+          i = 0
+          while i < len(lines):
+              raw = lines[i]
+              stripped = raw.strip()
+              if not stripped or stripped.startswith('#'):
+                  i += 1
+                  continue
+              if '=' not in raw:
+                  i += 1
+                  continue
+              key, value = raw.split('=', 1)
+              key = key.strip()
+              if key not in allowed:
+                  i += 1
+                  continue
+              value = value.strip()
+              if value.startswith('<<'):
+                  # heredoc/complex types not supported
+                  i += 1
+                  continue
+              if value.startswith('[') and not value.rstrip().endswith(']'):
+                  while i + 1 < len(lines):
+                      i += 1
+                      value += lines[i]
+                      if ']' in lines[i]:
+                          break
+              result[key] = value
+              i += 1
+          return result
+
+
+      def normalize(value):
+          value = value.strip()
+          replacements = {r'\btrue\b': 'True', r'\bfalse\b': 'False', r'\bnull\b': 'None'}
+          for pattern, replacement in replacements.items():
+              value = re.sub(pattern, replacement, value)
+          try:
+              return ast.literal_eval(value)
+          except Exception:
+              if value.startswith('"') and value.endswith('"'):
+                  return value[1:-1]
+              return value
+
+
+      def emit_env(name, value):
+          if value is None:
+              return
+          text = str(value)
+          print(f"{name}<<EOF")
+          print(text)
+          print("EOF")
+
+
+      backend_assignments = parse_assignments(os.environ.get('TF_BACKEND_FILE'), {
+          'bucket', 'key', 'region', 'dynamodb_table'
+      })
+      for key, env_name in (
+          ('bucket', 'TF_BACKEND_BUCKET'),
+          ('key', 'TF_BACKEND_KEY'),
+          ('region', 'TF_BACKEND_REGION'),
+          ('dynamodb_table', 'TF_BACKEND_DYNAMODB_TABLE'),
+      ):
+          if key in backend_assignments:
+              emit_env(env_name, normalize(backend_assignments[key]))
+
+      tfvars_assignments = parse_assignments(os.environ.get('TF_VARS_FILE'), {
+          'region',
+          'vpc_id',
+          'subnet_ids',
+          'cluster_name',
+          'collector_sg_name',
+          'consumer_sg_name',
+      })
+
+      for key, env_name in (
+          ('region', 'TF_VAR_region'),
+          ('vpc_id', 'TF_VAR_vpc_id'),
+          ('cluster_name', 'TF_VAR_cluster_name'),
+          ('collector_sg_name', 'TF_VAR_collector_sg_name'),
+          ('consumer_sg_name', 'TF_VAR_consumer_sg_name'),
+      ):
+          if key in tfvars_assignments:
+              emit_env(env_name, normalize(tfvars_assignments[key]))
+
+      if 'subnet_ids' in tfvars_assignments:
+          subnet_value = normalize(tfvars_assignments['subnet_ids'])
+          if isinstance(subnet_value, (list, tuple)):
+              serialized = json.dumps(list(subnet_value), separators=(',', ':'))
+          else:
+              serialized = str(subnet_value)
+          emit_env('TF_VAR_subnet_ids', serialized)
+      PY
+              env:
+                TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+                TF_VARS_FILE: ${{ env.TF_VARS_FILE }}
 
       - name: Terraform init
         run: terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false
+
+      - name: Check Terraform state contents
+        id: state_check
+        run: |
+          set -eo pipefail
+          if terraform -chdir=${{ env.TF_WORKING_DIR }} state list > state-list.txt; then
+            if [ -s state-list.txt ]; then
+              echo "empty=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "empty=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "empty=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebuild Terraform state from existing infrastructure
+        if: ${{ steps.state_check.outputs.empty == 'true' && env.TF_BACKEND_BUCKET != '' && env.TF_BACKEND_KEY != '' && env.TF_VAR_vpc_id != '' && env.TF_VAR_subnet_ids != '' }}
+        run: bash scripts/rebuild-tfstate.sh
+        env:
+          TF_BACKEND_BUCKET: ${{ env.TF_BACKEND_BUCKET }}
+          TF_BACKEND_KEY: ${{ env.TF_BACKEND_KEY }}
+          TF_BACKEND_REGION: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          TF_BACKEND_DYNAMODB_TABLE: ${{ env.TF_BACKEND_DYNAMODB_TABLE }}
+          TF_VAR_vpc_id: ${{ env.TF_VAR_vpc_id }}
+          TF_VAR_subnet_ids: ${{ env.TF_VAR_subnet_ids }}
+          TF_VAR_region: ${{ env.TF_VAR_region || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          TF_VAR_cluster_name: ${{ env.TF_VAR_cluster_name }}
+          TF_VAR_collector_sg_name: ${{ env.TF_VAR_collector_sg_name }}
+          TF_VAR_consumer_sg_name: ${{ env.TF_VAR_consumer_sg_name }}
+          AWS_REGION: ${{ env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
+          ASSUME_ROLE_ARN: ${{ env.ASSUME_ROLE_ARN }}
 
       - name: Terraform destroy
         run: |

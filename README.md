@@ -326,6 +326,10 @@ General Kafka settings that work well for **small, frequent messages**:
 - **Terraform reports resources already exist**
   - Re-run Terraform with the matching `existing_*` variables set (for example `existing_broker_log_group_name`, `existing_msk_broker_security_group_id`, or `existing_collector_role_name`) so the module reuses the pre-existing resources instead of creating new ones.
 
+- **Security groups remain after destroy**
+  - When `existing_collector_security_group_id` or `existing_consumer_security_group_id` is populated, Terraform treats the security groups as external data sources and will not delete them during destroy.
+  - If the state no longer tracks the security groups, import them using `scripts/rebuild-tfstate.sh` and then run `terraform destroy`, or delete them manually in the AWS console if they are managed outside of Terraform.
+
 - **Invalid single-argument block** (HCL)
   - Don’t use single-line blocks with multiple attributes. Use multi-line syntax:
     ```hcl
