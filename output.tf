@@ -110,16 +110,16 @@ locals {
       }
       policies = {
         msk_control_plane = {
-          name = aws_iam_policy.msk_control_plane.name
-          arn  = aws_iam_policy.msk_control_plane.arn
+          name = local.msk_control_policy_resolved_name
+          arn  = local.msk_control_policy_resolved_arn
         }
         producer = {
-          name = aws_iam_policy.producer.name
-          arn  = aws_iam_policy.producer.arn
+          name = local.producer_policy_resolved_name
+          arn  = local.producer_policy_resolved_arn
         }
         consumer = {
-          name = aws_iam_policy.consumer.name
-          arn  = aws_iam_policy.consumer.arn
+          name = local.consumer_policy_resolved_name
+          arn  = local.consumer_policy_resolved_arn
         }
       }
       attachments = {
@@ -165,7 +165,7 @@ output "collector_instance_profile_name" {
 }
 
 output "consumer_policy_arn" {
-  value       = aws_iam_policy.consumer.arn
+  value       = local.consumer_policy_resolved_arn
   description = "Attach this to consumer roles in other teams"
 }
 

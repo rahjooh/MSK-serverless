@@ -126,3 +126,21 @@ variable "existing_collector_instance_profile_name" {
   type        = string
   default     = null
 }
+
+variable "existing_msk_control_policy_arn" {
+  description = "ARN of an existing IAM policy that grants MSK control-plane permissions. When set, the module reuses the policy instead of creating a new one."
+  type        = string
+  default     = null
+}
+
+variable "existing_producer_policy_arn" {
+  description = "ARN of an existing IAM policy that grants producer permissions. When set, the module reuses the policy instead of creating a new one."
+  type        = string
+  default     = null
+}
+
+variable "existing_consumer_policy_arn" {
+  description = "ARN of an existing IAM policy that grants consumer permissions. When set, the module reuses the policy instead of creating a new one."
+  type        = string
+  default     = null
+}
