@@ -115,14 +115,38 @@ jobs:
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
       - name: Derive AWS assume role configuration
-        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' && env.TF_VAR_assume_role_arn != '' }}
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}
         run: |
-          {
-            echo "AWS_ASSUME_ROLE_ARN<<EOF";
-            echo "${TF_VAR_assume_role_arn}";
-            echo "EOF";
-          } >> "$GITHUB_ENV"
-           
+          python <<'PY'
+          import os
+          import re
+
+          arn = os.environ.get("AWS_ASSUME_ROLE_ARN", "").strip()
+          if arn:
+              raise SystemExit(0)
+
+          candidate = os.environ.get("TF_VAR_assume_role_arn", "").strip()
+          if not candidate:
+              tfvars_path = os.environ.get("TF_VARS_FILE", "").strip()
+              if tfvars_path and os.path.isfile(tfvars_path):
+                  with open(tfvars_path, "r", encoding="utf-8") as handle:
+                      content = handle.read()
+                  match = re.search(r"assume_role_arn\s*=\s*\"([^\"]+)\"", content)
+                  if match:
+                      candidate = match.group(1).strip()
+
+          if not candidate:
+              raise SystemExit(0)
+
+          github_env = os.environ.get("GITHUB_ENV")
+          if not github_env:
+              raise SystemExit(0)
+
+          with open(github_env, "a", encoding="utf-8") as env_file:
+              env_file.write("AWS_ASSUME_ROLE_ARN=" + candidate + "\n")
+          PY
+
+
       - name: Configure AWS credentials
         if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
