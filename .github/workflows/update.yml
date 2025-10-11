@@ -97,7 +97,8 @@ jobs:
                       continue
                   key, value = line.split("=", 1)
                   key = key.strip()
-                  value = value.strip().strip('"')
+                  # drop inline comments and surrounding quotes
+                  value = value.split('#', 1)[0].strip().strip('"')
                   data[key] = value
 
           mapping = {
@@ -116,6 +117,91 @@ jobs:
           PY
         env:
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+
+      - name: Export tfvars settings
+        if: ${{ env.TFVARS_CONTENT != '' }}
+        run: |
+          python <<'PY'
+          import ast
+          import json
+          import os
+          import sys
+
+          tfvars_path = os.environ.get("TF_VARS_FILE")
+          if not tfvars_path or not os.path.isfile(tfvars_path):
+              sys.exit(0)
+
+          allowed = {
+              'region',
+              'vpc_id',
+              'subnet_ids',
+              'cluster_name',
+              'collector_sg_name',
+              'consumer_sg_name',
+          }
+
+          def parse_assignments(path, allowed):
+              result = {}
+              with open(path, 'r', encoding='utf-8') as handle:
+                  lines = handle.readlines()
+              i = 0
+              while i < len(lines):
+                  raw = lines[i]
+                  if '=' not in raw:
+                      i += 1
+                      continue
+                  key, value = raw.split('=', 1)
+                  key = key.strip()
+                  if key not in allowed:
+                      i += 1
+                      continue
+                  value = value.split('#', 1)[0].strip()
+                  if value.startswith('[') and not value.rstrip().endswith(']'):
+                      while i + 1 < len(lines):
+                          i += 1
+                          value += lines[i]
+                          if ']' in lines[i]:
+                              break
+                  result[key] = value
+                  i += 1
+              return result
+
+          def normalize(value):
+              value = value.strip()
+              try:
+                  return ast.literal_eval(value)
+              except Exception:
+                  return value.strip('"')
+
+          github_env = os.environ["GITHUB_ENV"]
+          assignments = parse_assignments(tfvars_path, allowed)
+
+          def emit(name, value):
+              if value is None:
+                  return
+              with open(github_env, 'a', encoding='utf-8') as fh:
+                  fh.write(f"{name}<<EOF\n{value}\nEOF\n")
+
+          mapping = (
+              ('region', 'TF_VAR_region'),
+              ('vpc_id', 'TF_VAR_vpc_id'),
+              ('cluster_name', 'TF_VAR_cluster_name'),
+              ('collector_sg_name', 'TF_VAR_collector_sg_name'),
+              ('consumer_sg_name', 'TF_VAR_consumer_sg_name'),
+          )
+
+          for key, env_name in mapping:
+              if key in assignments:
+                  emit(env_name, normalize(assignments[key]))
+
+          if 'subnet_ids' in assignments:
+              val = normalize(assignments['subnet_ids'])
+              if isinstance(val, (list, tuple)):
+                  serialized = json.dumps(list(val), separators=(',', ':'))
+              else:
+                  serialized = str(val)
+              emit('TF_VAR_subnet_ids', serialized)
+          PY
 
       - name: Derive AWS assume role configuration
         if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}
