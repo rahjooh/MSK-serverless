@@ -91,11 +91,12 @@ jobs:
           
       - name: Export configuration for state rebuild script
         run: |
-          python3 <<'PY' >> "$GITHUB_ENV"
+          python3 - <<'PY'
           import ast
           import json
           import os
           import re
+          import sys
 
 
           def parse_assignments(path, allowed):
@@ -147,14 +148,14 @@ jobs:
                       return value[1:-1]
                   return value
 
+          github_env = os.environ.get('GITHUB_ENV')
 
           def emit_env(name, value):
-              if value is None:
+              if value is None or not github_env:
                   return
               text = str(value)
-              print(f"{name}<<EOF")
-              print(text)
-              print("EOF")
+              with open(github_env, 'a', encoding='utf-8') as fh:
+                  fh.write(f"{name}<<EOF\n{text}\nEOF\n")
 
 
           backend_assignments = parse_assignments(os.environ.get('TF_BACKEND_FILE'), {
