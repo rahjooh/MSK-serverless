@@ -115,7 +115,7 @@ jobs:
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
 
-     - name: Configure AWS credentials
+      - name: Configure AWS credentials
         if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
