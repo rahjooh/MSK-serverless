@@ -145,90 +145,139 @@ lookup_sg_id() {
     --query 'SecurityGroups[0].GroupId' --output text
 }
 
+missing_resources=()
+
+record_missing() {
+  local description="$1"
+  missing_resources+=("$description")
+  echo "Skipping ${description}" >&2
+}
+
+is_missing() {
+  local value="$1"
+  [ -z "$value" ] || [ "$value" = "None" ]
+}
+
+safe_import() {
+  local address="$1"
+  local identifier="$2"
+  local description="$3"
+  if is_missing "$identifier"; then
+    record_missing "$description (identifier not found)"
+    return
+  fi
+  if terraform import "$address" "$identifier"; then
+    return
+  fi
+  record_missing "$description (terraform import failed)"
+}
+
 COLLECTOR_SG_ID=$(lookup_sg_id "$COLLECTOR_SG_NAME")
-if [ -z "$COLLECTOR_SG_ID" ] || [ "$COLLECTOR_SG_ID" = "None" ]; then
-  echo "Could not find collector security group with name ${COLLECTOR_SG_NAME} in VPC ${VPC_ID}" >&2
-  exit 1
+if is_missing "$COLLECTOR_SG_ID"; then
+  record_missing "collector security group ${COLLECTOR_SG_NAME} in VPC ${VPC_ID}"
 fi
 
 CONSUMER_SG_ID=$(lookup_sg_id "$CONSUMER_SG_NAME")
-if [ -z "$CONSUMER_SG_ID" ] || [ "$CONSUMER_SG_ID" = "None" ]; then
-  echo "Could not find consumer security group with name ${CONSUMER_SG_NAME} in VPC ${VPC_ID}" >&2
-  exit 1
+if is_missing "$CONSUMER_SG_ID"; then
+  record_missing "consumer security group ${CONSUMER_SG_NAME} in VPC ${VPC_ID}"
 fi
 
 MSK_BROKER_SG_ID=$(lookup_sg_id "$MSK_BROKER_SG_NAME")
-if [ -z "$MSK_BROKER_SG_ID" ] || [ "$MSK_BROKER_SG_ID" = "None" ]; then
-  echo "Could not find MSK broker security group with name ${MSK_BROKER_SG_NAME} in VPC ${VPC_ID}" >&2
-  exit 1
+if is_missing "$MSK_BROKER_SG_ID"; then
+  record_missing "MSK broker security group ${MSK_BROKER_SG_NAME} in VPC ${VPC_ID}"
 fi
 
-COLLECTOR_RULE_ID=$(aws ec2 describe-security-group-rules \
-  --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
-            "Name=referenced-group-id,Values=${COLLECTOR_SG_ID}" \
-            "Name=ip-protocol,Values=tcp" \
-            "Name=from-port,Values=9098" \
-            "Name=to-port,Values=9098" \
-  --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
-if [ -z "$COLLECTOR_RULE_ID" ] || [ "$COLLECTOR_RULE_ID" = "None" ]; then
-  echo "Could not find security group ingress rule for collectors -> brokers" >&2
-  exit 1
+COLLECTOR_RULE_ID=""
+if ! is_missing "$MSK_BROKER_SG_ID" && ! is_missing "$COLLECTOR_SG_ID"; then
+  COLLECTOR_RULE_ID=$(aws ec2 describe-security-group-rules \
+    --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
+              "Name=referenced-group-id,Values=${COLLECTOR_SG_ID}" \
+              "Name=ip-protocol,Values=tcp" \
+              "Name=from-port,Values=9098" \
+              "Name=to-port,Values=9098" \
+    --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
+  if is_missing "$COLLECTOR_RULE_ID"; then
+    record_missing "security group ingress rule for collectors -> brokers"
+  fi
 fi
 
-CONSUMER_RULE_ID=$(aws ec2 describe-security-group-rules \
-  --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
-            "Name=referenced-group-id,Values=${CONSUMER_SG_ID}" \
-            "Name=ip-protocol,Values=tcp" \
-            "Name=from-port,Values=9098" \
-            "Name=to-port,Values=9098" \
-  --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
-if [ -z "$CONSUMER_RULE_ID" ] || [ "$CONSUMER_RULE_ID" = "None" ]; then
-  echo "Could not find security group ingress rule for consumers -> brokers" >&2
-  exit 1
+CONSUMER_RULE_ID=""
+if ! is_missing "$MSK_BROKER_SG_ID" && ! is_missing "$CONSUMER_SG_ID"; then
+  CONSUMER_RULE_ID=$(aws ec2 describe-security-group-rules \
+    --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
+              "Name=referenced-group-id,Values=${CONSUMER_SG_ID}" \
+              "Name=ip-protocol,Values=tcp" \
+              "Name=from-port,Values=9098" \
+              "Name=to-port,Values=9098" \
+    --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
+  if is_missing "$CONSUMER_RULE_ID"; then
+    record_missing "security group ingress rule for consumers -> brokers"
+  fi
 fi
 
-EGRESS_RULE_ID=$(aws ec2 describe-security-group-rules \
-  --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
-            "Name=is-egress,Values=true" \
-            "Name=ip-protocol,Values=-1" \
-            "Name=cidr,Values=0.0.0.0/0" \
-  --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
-if [ -z "$EGRESS_RULE_ID" ] || [ "$EGRESS_RULE_ID" = "None" ]; then
-  echo "Could not find security group egress rule for brokers" >&2
-  exit 1
+EGRESS_RULE_ID=""
+if ! is_missing "$MSK_BROKER_SG_ID"; then
+  EGRESS_RULE_ID=$(aws ec2 describe-security-group-rules \
+    --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
+              "Name=is-egress,Values=true" \
+              "Name=ip-protocol,Values=-1" \
+              "Name=cidr,Values=0.0.0.0/0" \
+    --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
+  if is_missing "$EGRESS_RULE_ID"; then
+    record_missing "security group egress rule for brokers"
+  fi
 fi
 
 CLUSTER_ARN=$(aws kafka list-clusters-v2 --cluster-name-filter "${CLUSTER_NAME}" \
   --query 'ClusterInfoList[0].ClusterArn' --output text)
-if [ -z "$CLUSTER_ARN" ] || [ "$CLUSTER_ARN" = "None" ]; then
-  echo "Could not find MSK Serverless cluster named ${CLUSTER_NAME}" >&2
-  exit 1
+if is_missing "$CLUSTER_ARN"; then
+  record_missing "MSK Serverless cluster named ${CLUSTER_NAME}"
 fi
 
 echo "Importing CloudWatch log group ${BROKER_LOG_GROUP_NAME}" >&2
-terraform import aws_cloudwatch_log_group.msk_broker "${BROKER_LOG_GROUP_NAME}"
+safe_import "aws_cloudwatch_log_group.msk_broker" "${BROKER_LOG_GROUP_NAME}" "CloudWatch log group ${BROKER_LOG_GROUP_NAME}"
 
 echo "Importing security groups" >&2
-terraform import aws_security_group.collector "${COLLECTOR_SG_ID}"
-terraform import aws_security_group.consumers "${CONSUMER_SG_ID}"
-terraform import aws_security_group.msk_brokers "${MSK_BROKER_SG_ID}"
+if ! is_missing "$COLLECTOR_SG_ID"; then
+  safe_import "aws_security_group.collector" "${COLLECTOR_SG_ID}" "collector security group ${COLLECTOR_SG_NAME}"
+fi
+if ! is_missing "$CONSUMER_SG_ID"; then
+  safe_import "aws_security_group.consumers" "${CONSUMER_SG_ID}" "consumer security group ${CONSUMER_SG_NAME}"
+fi
+if ! is_missing "$MSK_BROKER_SG_ID"; then
+  safe_import "aws_security_group.msk_brokers" "${MSK_BROKER_SG_ID}" "MSK broker security group ${MSK_BROKER_SG_NAME}"
+fi
 
 echo "Importing security group rules" >&2
-terraform import aws_vpc_security_group_ingress_rule.msk_iam_9098_from_collector "${COLLECTOR_RULE_ID}"
-terraform import aws_vpc_security_group_ingress_rule.msk_iam_9098_from_consumers "${CONSUMER_RULE_ID}"
-terraform import aws_vpc_security_group_egress_rule.msk_all_egress "${EGRESS_RULE_ID}"
+if ! is_missing "$COLLECTOR_RULE_ID"; then
+  safe_import "aws_vpc_security_group_ingress_rule.msk_iam_9098_from_collector" "${COLLECTOR_RULE_ID}" "collector -> broker security group rule"
+fi
+if ! is_missing "$CONSUMER_RULE_ID"; then
+  safe_import "aws_vpc_security_group_ingress_rule.msk_iam_9098_from_consumers" "${CONSUMER_RULE_ID}" "consumer -> broker security group rule"
+fi
+if ! is_missing "$EGRESS_RULE_ID"; then
+  safe_import "aws_vpc_security_group_egress_rule.msk_all_egress" "${EGRESS_RULE_ID}" "broker egress security group rule"
+fi
 
 echo "Importing MSK Serverless cluster" >&2
-terraform import aws_msk_serverless_cluster.this "${CLUSTER_ARN}"
+if ! is_missing "$CLUSTER_ARN"; then
+  safe_import "aws_msk_serverless_cluster.this" "${CLUSTER_ARN}" "MSK Serverless cluster ${CLUSTER_NAME}"
+fi
 
 echo "Importing IAM resources" >&2
-terraform import aws_iam_role.collector_role "${COLLECTOR_ROLE_NAME}"
-terraform import aws_iam_instance_profile.collector_profile "${COLLECTOR_INSTANCE_PROFILE_NAME}"
-terraform import aws_iam_policy.msk_control_plane "${CONTROL_POLICY_ARN}"
-terraform import aws_iam_policy.producer "${PRODUCER_POLICY_ARN}"
-terraform import aws_iam_policy.consumer "${CONSUMER_POLICY_ARN}"
-terraform import aws_iam_role_policy_attachment.collector_control_attach "${COLLECTOR_ROLE_NAME}/${CONTROL_POLICY_ARN}"
-terraform import aws_iam_role_policy_attachment.collector_producer_attach "${COLLECTOR_ROLE_NAME}/${PRODUCER_POLICY_ARN}"
+safe_import "aws_iam_role.collector_role" "${COLLECTOR_ROLE_NAME}" "collector IAM role ${COLLECTOR_ROLE_NAME}"
+safe_import "aws_iam_instance_profile.collector_profile" "${COLLECTOR_INSTANCE_PROFILE_NAME}" "collector instance profile ${COLLECTOR_INSTANCE_PROFILE_NAME}"
+safe_import "aws_iam_policy.msk_control_plane" "${CONTROL_POLICY_ARN}" "MSK control plane policy ${MSK_CONTROL_POLICY_NAME}"
+safe_import "aws_iam_policy.producer" "${PRODUCER_POLICY_ARN}" "producer policy ${PRODUCER_POLICY_NAME}"
+safe_import "aws_iam_policy.consumer" "${CONSUMER_POLICY_ARN}" "consumer policy ${CONSUMER_POLICY_NAME}"
+safe_import "aws_iam_role_policy_attachment.collector_control_attach" "${COLLECTOR_ROLE_NAME}/${CONTROL_POLICY_ARN}" "collector role to control plane policy attachment"
+safe_import "aws_iam_role_policy_attachment.collector_producer_attach" "${COLLECTOR_ROLE_NAME}/${PRODUCER_POLICY_ARN}" "collector role to producer policy attachment"
+
+if [ "${#missing_resources[@]}" -gt 0 ]; then
+  echo "One or more resources could not be imported. Skipping terraform refresh/plan." >&2
+  printf '  - %s\n' "${missing_resources[@]}" >&2
+  exit 0
+fi
 
 echo "Refreshing state to verify imports" >&2
 terraform apply -refresh-only -input=false -auto-approve
