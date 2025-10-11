@@ -187,7 +187,7 @@ output "consumer_sg_id" {
 
 output "infrastructure_summary_json" {
   description = "JSON summary of the AWS resources created by this configuration"
-  value       = jsonencode(local.infrastructure_summary)
+  value       = local.infrastructure_summary
 }
 
 resource "local_file" "infrastructure_summary" {
