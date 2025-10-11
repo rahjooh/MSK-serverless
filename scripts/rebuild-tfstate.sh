@@ -2,6 +2,16 @@
 set -euo pipefail
 
 if ! command -v terraform >/dev/null 2>&1; then
+  if [ -n "${TERRAFORM_CLI_PATH:-}" ]; then
+    if [ -d "$TERRAFORM_CLI_PATH" ]; then
+      PATH="$TERRAFORM_CLI_PATH:$PATH"
+    elif [ -x "$TERRAFORM_CLI_PATH" ]; then
+      PATH="$(dirname "$TERRAFORM_CLI_PATH"):$PATH"
+    fi
+  fi
+fi
+
+if ! command -v terraform >/dev/null 2>&1; then
   echo "terraform CLI is required" >&2
   exit 1
 fi
