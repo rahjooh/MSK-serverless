@@ -114,7 +114,15 @@ jobs:
         env:
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
-
+      - name: Derive AWS assume role configuration
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' && env.TF_VAR_assume_role_arn != '' }}
+        run: |
+          {
+            echo "AWS_ASSUME_ROLE_ARN<<EOF";
+            echo "${TF_VAR_assume_role_arn}";
+            echo "EOF";
+          } >> "$GITHUB_ENV"
+           
       - name: Configure AWS credentials
         if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
