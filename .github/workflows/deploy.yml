@@ -1,0 +1,159 @@
+name: Terraform Apply/Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to run"
+        type: choice
+        default: apply
+        options:
+          - apply
+          - destroy
+      use_existing:
+        description: "Reuse existing IAM/SG/log group if found"
+        type: boolean
+        default: true
+      s3_tfvars_bucket:
+        description: "S3 bucket containing terraform.tfvars"
+        type: string
+        required: false
+      s3_tfvars_key:
+        description: "S3 key for terraform.tfvars"
+        type: string
+        required: false
+      s3_outputs_bucket:
+        description: "Optional S3 bucket to upload outputs.json after apply"
+        type: string
+        required: false
+      s3_outputs_key:
+        description: "Optional S3 key for outputs.json"
+        type: string
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.6.6
+  TF_INPUT: 0
+  TF_IN_AUTOMATION: 1
+  TF_BACKEND_FILE: backend.auto.tfbackend
+
+jobs:
+  deploy:
+    name: Terraform ${{ inputs.action }} (use_existing=${{ inputs.use_existing }})
+    runs-on: ubuntu-latest
+    env:
+      # Common Terraform variables (optionally provided via repo/environment secrets)
+      TF_VAR_region: ${{ secrets.TF_VAR_REGION || vars.TF_VAR_REGION || '' }}
+      TF_VAR_vpc_id: ${{ secrets.TF_VAR_VPC_ID || vars.TF_VAR_VPC_ID || '' }}
+      TF_VAR_subnet_ids: ${{ secrets.TF_VAR_SUBNET_IDS || vars.TF_VAR_SUBNET_IDS || '' }}
+      TF_VAR_assume_role_arn: ${{ secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
+      TF_VAR_cluster_name: ${{ secrets.TF_VAR_CLUSTER_NAME || vars.TF_VAR_CLUSTER_NAME || '' }}
+      TF_VAR_collector_sg_name: ${{ secrets.TF_VAR_COLLECTOR_SG_NAME || vars.TF_VAR_COLLECTOR_SG_NAME || '' }}
+      TF_VAR_consumer_sg_name: ${{ secrets.TF_VAR_CONSUMER_SG_NAME || vars.TF_VAR_CONSUMER_SG_NAME || '' }}
+      TF_VAR_log_kms_key_arn: ${{ secrets.TF_VAR_LOG_KMS_KEY_ARN || vars.TF_VAR_LOG_KMS_KEY_ARN || '' }}
+      TF_VAR_producer_topic_prefixes: ${{ secrets.TF_VAR_PRODUCER_TOPIC_PREFIXES || vars.TF_VAR_PRODUCER_TOPIC_PREFIXES || '' }}
+      TF_VAR_consumer_topic_prefixes: ${{ secrets.TF_VAR_CONSUMER_TOPIC_PREFIXES || vars.TF_VAR_CONSUMER_TOPIC_PREFIXES || '' }}
+      TF_VAR_consumer_group_names: ${{ secrets.TF_VAR_CONSUMER_GROUP_NAMES || vars.TF_VAR_CONSUMER_GROUP_NAMES || '' }}
+      TF_VAR_collector_sg_egress_cidrs: ${{ secrets.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS || vars.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS || '' }}
+
+      # AWS auth: prefer role assumption via OIDC, else static keys
+      AWS_ASSUME_ROLE_ARN: ${{ secrets.AWS_ASSUME_ROLE_ARN || secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID || vars.AWS_ACCESS_KEY_ID || '' }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY || vars.AWS_SECRET_ACCESS_KEY || '' }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN || vars.AWS_SESSION_TOKEN || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Materialize backend config from secret (optional)
+        if: ${{ secrets.TF_BACKEND_CONFIG != '' || vars.TF_BACKEND_CONFIG != '' }}
+        run: |
+          printf '%s\n' "${TF_BACKEND_CONFIG}" > "${TF_BACKEND_FILE}"
+        env:
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG || vars.TF_BACKEND_CONFIG }}
+
+      - name: Configure AWS credentials (assume role)
+        if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.TF_VAR_region || 'ap-south-1' }}
+          role-duration-seconds: 3600
+          role-skip-session-tagging: true
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+
+      - name: Configure AWS credentials (static)
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.TF_VAR_region || 'ap-south-1' }}
+
+      - name: Validate AWS credential configuration
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '') }}
+        run: |
+          echo "::error::AWS credentials are not configured. Provide AWS_ASSUME_ROLE_ARN (optionally with access keys for source credentials) or supply AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+          exit 1
+
+      - name: Download terraform.tfvars from S3 (optional)
+        if: ${{ inputs.s3_tfvars_bucket != '' && inputs.s3_tfvars_key != '' }}
+        run: |
+          aws s3 cp "s3://${{ inputs.s3_tfvars_bucket }}/${{ inputs.s3_tfvars_key }}" terraform.tfvars
+          terraform fmt terraform.tfvars || true
+
+      - name: Init Terraform (with backend config if provided)
+        run: |
+          if [ -s "${TF_BACKEND_FILE}" ]; then \
+            make INIT_ARGS="-backend-config=${TF_BACKEND_FILE}" init; \
+          else \
+            make init; \
+          fi
+
+      - name: Show existing resources (pre-apply)
+        if: ${{ inputs.use_existing == true }}
+        run: make check-existing
+        env:
+          VPC_ID: ${{ env.TF_VAR_vpc_id }}
+          AWS_REGION: ${{ env.TF_VAR_region || 'ap-south-1' }}
+
+      - name: Apply (reuse existing if found)
+        if: ${{ inputs.action == 'apply' && inputs.use_existing == true }}
+        run: make apply-use-existing
+        env:
+          VPC_ID: ${{ env.TF_VAR_vpc_id }}
+          AWS_REGION: ${{ env.TF_VAR_region || 'ap-south-1' }}
+
+      - name: Apply (fresh)
+        if: ${{ inputs.action == 'apply' && inputs.use_existing != true }}
+        run: make apply
+
+      - name: Upload outputs.json to S3 (optional)
+        if: ${{ inputs.action == 'apply' && inputs.s3_outputs_bucket != '' && inputs.s3_outputs_key != '' }}
+        run: |
+          terraform output -json > outputs.json || true
+          aws s3 cp outputs.json "s3://${{ inputs.s3_outputs_bucket }}/${{ inputs.s3_outputs_key }}"
+
+      - name: Destroy
+        if: ${{ inputs.action == 'destroy' }}
+        run: make destroy
+
+      - name: Show existing resources (post-run)
+        run: make check-existing || true
+        env:
+          VPC_ID: ${{ env.TF_VAR_vpc_id }}
+          AWS_REGION: ${{ env.TF_VAR_region || 'ap-south-1' }}
+

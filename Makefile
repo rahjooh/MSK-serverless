@@ -8,8 +8,8 @@ TF_PLAN ?= tfplan.out
 TF_VAR_FILE ?= terraform.tfvars
 
 PLAN_ARGS ?=
-APPLY_ARGS ?=
-DESTROY_ARGS ?=
+APPLY_ARGS ?= -auto-approve
+DESTROY_ARGS ?= -auto-approve
 REFRESH_ARGS ?=
 IMPORT_ARGS ?=
 INIT_ARGS ?=
@@ -20,7 +20,7 @@ export VPC_ID ?= vpc-088763652e22bcc79
 export TF_IN_AUTOMATION = 1
 export TF_INPUT = 0
 
-.PHONY: help init fmt validate plan apply plan-destroy destroy import-msk import-msk-auto import-support-resources refresh-state state-pull clean import force-destroy rebuild-tfstate
+.PHONY: help init fmt validate plan apply plan-destroy destroy check-existing apply-use-existing plan-use-existing import-msk import-msk-auto import-support-resources refresh-state state-pull clean import force-destroy rebuild-tfstate
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_.-]+:.*##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*##"} {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -37,7 +37,7 @@ validate: init ## Validate configuration
 plan: init validate ## Generate and store execution plan
 	$(TF) plan -out=$(TF_PLAN) $(PLAN_ARGS)
 
-apply: init ## Apply configuration (uses stored plan when present)
+apply: init ## Apply configuration (non-interactive; uses stored plan when present)
 	if [ -f "$(TF_PLAN)" ]; then \
 		$(TF) apply $(APPLY_ARGS) "$(TF_PLAN)"; \
 	else \
@@ -47,8 +47,109 @@ apply: init ## Apply configuration (uses stored plan when present)
 plan-destroy: init ## Create destroy plan without applying it
 	$(TF) plan -destroy $(PLAN_ARGS)
 
-destroy: init ## Destroy managed infrastructure
+destroy: init ## Destroy managed infrastructure (non-interactive)
 	$(TF) destroy $(DESTROY_ARGS)
+
+# --- YAML helpers (simple, no external deps) ---
+# Extract .<section>.<item>.name (indented YAML map with a name field)
+define yaml_name
+awk '\
+  BEGIN{s=0;i=0} \
+  /^$(1):/{s=1; next} \
+  /^[^[:space:]]/{if(s==1){exit}} \
+  s==1 && /^  $(2):/{i=1; next} \
+  i==1 && /^  [^[:space:]]/{exit} \
+  i==1 && /^    name:/ {sub(/^    name:[[:space:]]*/, ""); print; exit} \
+' naming.yml
+endef
+
+# Extract .<section>.name (top-level section with name field)
+define yaml_top_name
+awk '\
+  BEGIN{found=0} \
+  /^$(1):/{found=1; next} \
+  found==1 && /^  name:/ {sub(/^  name:[[:space:]]*/, ""); print; exit} \
+' naming.yml
+endef
+
+# Build -var flags for any pre-existing IAM/SG/CW resources so Terraform reuses them
+define build_existing_args
+set -e; \
+AWS_REGION=$${AWS_REGION:-ap-south-1}; \
+VPC_ID=$${VPC_ID:?Set VPC_ID to the VPC ID}; \
+ACCOUNT_ID=$${AWS_ACCOUNT_ID:-$$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)}; \
+COLLECTOR_SG_NAME=$$($(call yaml_name,security_groups,collector)); \
+CONSUMER_SG_NAME=$$($(call yaml_name,security_groups,consumer)); \
+BROKER_SG_NAME=$$($(call yaml_name,security_groups,brokers)); \
+CLUSTER_NAME=$$($(call yaml_top_name,cluster)); \
+LOG_GROUP_NAME=$$($(call yaml_name,cloudwatch,broker_log_group)); \
+ROLE_NAME=$$($(call yaml_name,iam,collector_role)); \
+INSTANCE_PROFILE_NAME=$$($(call yaml_name,iam,instance_profile)); \
+CONTROL_POLICY_NAME=$$($(call yaml_name,iam,control_plane_policy)); \
+PRODUCER_POLICY_NAME=$$($(call yaml_name,iam,producer_policy)); \
+CONSUMER_POLICY_NAME=$$($(call yaml_name,iam,consumer_policy)); \
+EXISTING_ARGS=""; \
+COLLECTOR_SG_ID=$$(aws ec2 describe-security-groups --region "$$AWS_REGION" --filters Name=vpc-id,Values="$$VPC_ID" Name=group-name,Values="$$COLLECTOR_SG_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true); \
+[ "$$COLLECTOR_SG_ID" != "None" ] && [ -n "$$COLLECTOR_SG_ID" ] && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_collector_security_group_id=$$COLLECTOR_SG_ID"; \
+CONSUMER_SG_ID=$$(aws ec2 describe-security-groups --region "$$AWS_REGION" --filters Name=vpc-id,Values="$$VPC_ID" Name=group-name,Values="$$CONSUMER_SG_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true); \
+[ "$$CONSUMER_SG_ID" != "None" ] && [ -n "$$CONSUMER_SG_ID" ] && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_consumer_security_group_id=$$CONSUMER_SG_ID"; \
+BROKER_SG_ID=$$(aws ec2 describe-security-groups --region "$$AWS_REGION" --filters Name=vpc-id,Values="$$VPC_ID" Name=group-name,Values="$$BROKER_SG_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true); \
+[ "$$BROKER_SG_ID" != "None" ] && [ -n "$$BROKER_SG_ID" ] && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_msk_broker_security_group_id=$$BROKER_SG_ID"; \
+LOG_GROUP_FOUND=$$(aws logs describe-log-groups --region "$$AWS_REGION" --log-group-name-prefix "$$LOG_GROUP_NAME" --query 'logGroups[?logGroupName==`'"$$LOG_GROUP_NAME"'`].logGroupName' --output text 2>/dev/null || true); \
+[ -n "$$LOG_GROUP_FOUND" ] && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_broker_log_group_name=$$LOG_GROUP_NAME"; \
+if aws iam get-role --role-name "$$ROLE_NAME" >/dev/null 2>&1; then EXISTING_ARGS="$$EXISTING_ARGS -var=existing_collector_role_name=$$ROLE_NAME"; fi; \
+if aws iam get-instance-profile --instance-profile-name "$$INSTANCE_PROFILE_NAME" >/dev/null 2>&1; then EXISTING_ARGS="$$EXISTING_ARGS -var=existing_collector_instance_profile_name=$$INSTANCE_PROFILE_NAME"; fi; \
+if [ -n "$$ACCOUNT_ID" ]; then \
+  CONTROL_POLICY_ARN="arn:aws:iam::$$ACCOUNT_ID:policy/$$CONTROL_POLICY_NAME"; \
+  PRODUCER_POLICY_ARN="arn:aws:iam::$$ACCOUNT_ID:policy/$$PRODUCER_POLICY_NAME"; \
+  CONSUMER_POLICY_ARN="arn:aws:iam::$$ACCOUNT_ID:policy/$$CONSUMER_POLICY_NAME"; \
+  aws iam get-policy --policy-arn "$$CONTROL_POLICY_ARN" >/dev/null 2>&1 && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_msk_control_policy_arn=$$CONTROL_POLICY_ARN"; \
+  aws iam get-policy --policy-arn "$$PRODUCER_POLICY_ARN" >/dev/null 2>&1 && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_producer_policy_arn=$$PRODUCER_POLICY_ARN"; \
+  aws iam get-policy --policy-arn "$$CONSUMER_POLICY_ARN" >/dev/null 2>&1 && EXISTING_ARGS="$$EXISTING_ARGS -var=existing_consumer_policy_arn=$$CONSUMER_POLICY_ARN"; \
+fi; \
+echo "$$EXISTING_ARGS"
+endef
+
+check-existing: ## Check existing IAM, SGs, and log group; prints discovered IDs/ARNs
+	@AWS_REGION=$${AWS_REGION:-ap-south-1}; \
+	VPC_ID=$${VPC_ID:?Set VPC_ID to the VPC ID}; \
+	ACCOUNT_ID=$${AWS_ACCOUNT_ID:-$$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)}; \
+	COLLECTOR_SG_NAME=$$($(call yaml_name,security_groups,collector)); \
+	CONSUMER_SG_NAME=$$($(call yaml_name,security_groups,consumer)); \
+	BROKER_SG_NAME=$$($(call yaml_name,security_groups,brokers)); \
+	CLUSTER_NAME=$$($(call yaml_top_name,cluster)); \
+	LOG_GROUP_NAME=$$($(call yaml_name,cloudwatch,broker_log_group)); \
+	ROLE_NAME=$$($(call yaml_name,iam,collector_role)); \
+	INSTANCE_PROFILE_NAME=$$($(call yaml_name,iam,instance_profile)); \
+	CONTROL_POLICY_NAME=$$($(call yaml_name,iam,control_plane_policy)); \
+	PRODUCER_POLICY_NAME=$$($(call yaml_name,iam,producer_policy)); \
+	CONSUMER_POLICY_NAME=$$($(call yaml_name,iam,consumer_policy)); \
+	echo "collector SG:  $$(aws ec2 describe-security-groups --region "$$AWS_REGION" --filters Name=vpc-id,Values="$$VPC_ID" Name=group-name,Values="$$COLLECTOR_SG_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"; \
+	echo "consumer SG:   $$(aws ec2 describe-security-groups --region "$$AWS_REGION" --filters Name=vpc-id,Values="$$VPC_ID" Name=group-name,Values="$$CONSUMER_SG_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"; \
+	echo "broker SG:     $$(aws ec2 describe-security-groups --region "$$AWS_REGION" --filters Name=vpc-id,Values="$$VPC_ID" Name=group-name,Values="$$BROKER_SG_NAME" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"; \
+	echo "log group:     $$(aws logs describe-log-groups --region "$$AWS_REGION" --log-group-name-prefix "$$LOG_GROUP_NAME" --query 'logGroups[?logGroupName==`'"$$LOG_GROUP_NAME"'`].logGroupName' --output text 2>/dev/null || true)"; \
+	if [ -n "$$ACCOUNT_ID" ]; then \
+	  CONTROL_POLICY_ARN="arn:aws:iam::$$ACCOUNT_ID:policy/$$CONTROL_POLICY_NAME"; \
+	  PRODUCER_POLICY_ARN="arn:aws:iam::$$ACCOUNT_ID:policy/$$PRODUCER_POLICY_NAME"; \
+	  CONSUMER_POLICY_ARN="arn:aws:iam::$$ACCOUNT_ID:policy/$$CONSUMER_POLICY_NAME"; \
+	  echo -n "role exists:     "; aws iam get-role --role-name "$$ROLE_NAME" >/dev/null 2>&1 && echo "$$ROLE_NAME" || echo "None"; \
+	  echo -n "profile exists:  "; aws iam get-instance-profile --instance-profile-name "$$INSTANCE_PROFILE_NAME" >/dev/null 2>&1 && echo "$$INSTANCE_PROFILE_NAME" || echo "None"; \
+	  echo -n "ctl policy ARN:  "; aws iam get-policy --policy-arn "$$CONTROL_POLICY_ARN" >/dev/null 2>&1 && echo "$$CONTROL_POLICY_ARN" || echo "None"; \
+	  echo -n "prod policy ARN: "; aws iam get-policy --policy-arn "$$PRODUCER_POLICY_ARN" >/dev/null 2>&1 && echo "$$PRODUCER_POLICY_ARN" || echo "None"; \
+	  echo -n "cons policy ARN: "; aws iam get-policy --policy-arn "$$CONSUMER_POLICY_ARN" >/dev/null 2>&1 && echo "$$CONSUMER_POLICY_ARN" || echo "None"; \
+	fi
+
+apply-use-existing: init ## Apply but reuse any existing IAM/SG/log group discovered via AWS
+	EXISTING_ARGS=$$($(build_existing_args)); \
+	if [ -f "$(TF_PLAN)" ]; then \
+	  $(TF) apply $(APPLY_ARGS) $$EXISTING_ARGS "$(TF_PLAN)"; \
+	else \
+	  $(TF) apply $(APPLY_ARGS) $$EXISTING_ARGS; \
+	fi
+
+plan-use-existing: init ## Plan but reuse any existing IAM/SG/log group discovered via AWS
+	EXISTING_ARGS=$$($(build_existing_args)); \
+	$(TF) plan $$EXISTING_ARGS $(PLAN_ARGS)
 
 import-msk: init ## Import existing MSK cluster into state (requires MSK_CLUSTER_ARN)
 	@: $${MSK_CLUSTER_ARN:?Set MSK_CLUSTER_ARN to the MSK cluster ARN}

@@ -1,0 +1,21 @@
+region = "eu-north-1"
+
+# Optional: let Terraform assume the MSK builder role for CI/CD runs.
+assume_role_arn = "arn:aws:iam::123..:role/MSK-Builder"
+
+vpc_id = "vpc-1234.."
+subnet_ids = ["subnet-123a..", "subnet-123b"] # private subnets in 2+ AZs
+# Kafka IAM scoping
+producer_topic_prefixes = ["exchg.", "trades."]
+consumer_topic_prefixes = ["exchg."]
+consumer_group_names    = ["team-quant", "team-research"]
+
+tags = {
+  Project = "Data"
+  Owner   = "Hadi"
+  Env     = "prod"
+}
+
+log_retention_days = 3
+log_kms_key_arn = null # or "arn:aws:kms:ap-south-1:123456789012:key/abcd-..."
+

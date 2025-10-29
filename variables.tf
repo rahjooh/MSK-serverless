@@ -11,7 +11,7 @@ variable "assume_role_arn" {
 variable "pb_arn" {
   description = "Permissions boundary ARN required for IAM roles."
   type        = string
-  default     = "arn:aws:iam::640168415309:policy/MSK-Permission-Boundary"
+  default     = null
 }
 
 variable "access_scope" {
@@ -25,7 +25,7 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  type = list(string) # 2+ private subnets in different AZs
+  type = list(string) 
 }
 
 variable "cluster_name" {
@@ -35,7 +35,7 @@ variable "cluster_name" {
 
 variable "log_retention_days" {
   type    = number
-  default = 14
+  default = 5
 }
 
 variable "log_kms_key_arn" {
