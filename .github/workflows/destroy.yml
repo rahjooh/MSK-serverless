@@ -88,6 +88,18 @@ jobs:
         env:
           TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+
+      - name: Detect backend bucket region
+        if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
+        run: |
+          set -euo pipefail
+          BUCKET=$(awk -F'=' '/^[[:space:]]*bucket[[:space:]]*=/{gsub(/[#].*$/,""); v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/"/ , "", v); print v}' "${TF_BACKEND_FILE}" || true)
+          if [ -n "${BUCKET}" ]; then
+            REGION=$(aws s3api get-bucket-location --bucket "${BUCKET}" --query 'LocationConstraint' --output text 2>/dev/null || true)
+            if [ "${REGION}" = "None" ] || [ -z "${REGION}" ]; then REGION=us-east-1; fi
+            echo "TF_BACKEND_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
+            echo "TF_BACKEND_REGION=${REGION}" >> "$GITHUB_ENV"
+          fi
           
       - name: Export configuration for state rebuild script
         run: |
@@ -201,7 +213,16 @@ jobs:
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
           TF_VARS_FILE: ${{ env.TF_VARS_FILE }}
       - name: Terraform init
-        run: terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false
+        run: |
+          if [ -s "${TF_BACKEND_FILE}" ]; then \
+            if [ -n "${TF_BACKEND_REGION}" ]; then \
+              terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false -backend-config="${TF_BACKEND_FILE}" -backend-config="region=${TF_BACKEND_REGION}"; \
+            else \
+              terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false -backend-config="${TF_BACKEND_FILE}"; \
+            fi; \
+          else \
+            terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false; \
+          fi
 
       - name: Check Terraform state contents
         id: state_check
