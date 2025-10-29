@@ -20,6 +20,9 @@ env:
   AWS_REGION: ap-south-1
   INFRA_SUMMARY_BUCKET: test-raw-databucket
   INFRA_SUMMARY_KEY: terraform/cluster/resources.json
+  USE_EXISTING: 'true'
+  S3_TFVARS_BUCKET: ${{ secrets.S3_TFVARS_BUCKET || vars.S3_TFVARS_BUCKET || '' }}
+  S3_TFVARS_KEY: ${{ secrets.S3_TFVARS_KEY || vars.S3_TFVARS_KEY || '' }}
 
 jobs:
   apply:
@@ -90,19 +93,95 @@ jobs:
           TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
-      - name: Terraform init
-        run: terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false
+      - name: Configure AWS credentials (assume role)
+        if: ${{ env.ASSUME_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          role-duration-seconds: 3600
+          role-skip-session-tagging: true
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
 
-      - name: Terraform plan
+      - name: Configure AWS credentials (static)
+        if: ${{ env.ASSUME_ROLE_ARN == '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+
+      - name: Validate AWS credential configuration
+        if: ${{ env.ASSUME_ROLE_ARN == '' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '') }}
         run: |
-          if [ -f "${{ env.TF_VARS_FILE }}" ]; then
-            terraform -chdir=${{ env.TF_WORKING_DIR }} plan -input=false -out="${{ env.PLAN_FILE }}" -var-file="${{ env.TF_VARS_FILE }}"
-          else
-            terraform -chdir=${{ env.TF_WORKING_DIR }} plan -input=false -out="${{ env.PLAN_FILE }}"
+          echo "::error::AWS credentials are not configured. Provide ASSUME_ROLE_ARN (optionally with access keys for source credentials) or supply AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+          exit 1
+
+      - name: Download terraform.tfvars from S3 (optional)
+        if: ${{ env.S3_TFVARS_BUCKET != '' && env.S3_TFVARS_KEY != '' }}
+        run: |
+          aws s3 cp "s3://${S3_TFVARS_BUCKET}/${S3_TFVARS_KEY}" terraform.tfvars
+          # also mirror to auto tfvars so Terraform loads it implicitly
+          cp terraform.tfvars "${TF_VARS_FILE}" || true
+          terraform fmt terraform.tfvars || true
+
+      - name: Terraform init (via Makefile)
+        run: |
+          if [ -s "${TF_BACKEND_FILE}" ]; then \
+            make INIT_ARGS="-backend-config=${TF_BACKEND_FILE}" init; \
+          else \
+            make init; \
           fi
 
-      - name: Terraform apply
-        run: terraform -chdir=${{ env.TF_WORKING_DIR }} apply -input=false -auto-approve "${{ env.PLAN_FILE }}"
+      - name: Export VPC_ID/AWS_REGION from tfvars (if present)
+        run: |
+          python <<'PY'
+          import ast, os, sys
+          candidates = ['terraform.tfvars', os.environ.get('TF_VARS_FILE','')]
+          out = {}
+          def scan(path):
+              if not path or not os.path.isfile(path):
+                  return False
+              with open(path, 'r', encoding='utf-8') as fh:
+                  for raw in fh:
+                      if '=' not in raw:
+                          continue
+                      k, v = raw.split('=', 1)
+                      k = k.strip()
+                      if k not in {'vpc_id','region'}:
+                          continue
+                      v = v.split('#',1)[0].strip()
+                      try:
+                          out[k] = ast.literal_eval(v)
+                      except Exception:
+                          out[k] = v.strip('"')
+              return True
+          for c in candidates:
+              if scan(c):
+                  break
+          env_path = os.environ.get('GITHUB_ENV')
+          if env_path:
+              with open(env_path, 'a', encoding='utf-8') as fh:
+                  if 'vpc_id' in out:
+                      fh.write(f"VPC_ID={out['vpc_id']}\n")
+                  if 'region' in out:
+                      fh.write(f"AWS_REGION={out['region']}\n")
+          PY
+
+      - name: Show existing resources (pre-apply)
+        if: ${{ env.USE_EXISTING == 'true' }}
+        run: make check-existing
+
+      - name: Terraform apply (use existing if found)
+        if: ${{ env.USE_EXISTING == 'true' }}
+        run: make apply-use-existing
+
+      - name: Terraform apply (fresh)
+        if: ${{ env.USE_EXISTING != 'true' }}
+        run: make apply
 
       - name: Save infrastructure summary
         run: terraform -chdir=${{ env.TF_WORKING_DIR }} output -json infrastructure_summary_json > resources.json
