@@ -156,7 +156,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.ASSUME_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
           role-duration-seconds: 3600
           role-skip-session-tagging: true
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
@@ -170,7 +170,7 @@ jobs:
           aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
 
       - name: Validate AWS credential configuration
         if: ${{ env.ASSUME_ROLE_ARN == '' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '') }}
