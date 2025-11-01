@@ -26,6 +26,12 @@ if ! command -v aws >/dev/null 2>&1; then
   exit 1
 fi
 
+# Python is used to parse naming.yml and emit defaults
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required" >&2
+  exit 1
+fi
+
 : "${TF_BACKEND_BUCKET:?Environment variable TF_BACKEND_BUCKET must be set}"
 : "${TF_BACKEND_KEY:?Environment variable TF_BACKEND_KEY must be set}"
 
@@ -45,7 +51,7 @@ export AWS_REGION="$AWS_REGION_EFFECTIVE"
 : "${TF_VAR_vpc_id:?Environment variable TF_VAR_vpc_id must be set (for filtering existing security groups)}"
 : "${TF_VAR_subnet_ids:?Environment variable TF_VAR_subnet_ids must be set (JSON encoded list)}"
 
-read -r -d '' NAME_DEFAULTS <<'PY'
+NAME_DEFAULTS="$(python3 - <<'PY'
 import pathlib
 import sys
 
@@ -114,8 +120,8 @@ values = {
 for key, value in values.items():
     print(f"{key}={shell_escape(value)}")
 PY
+)"
 
-# shellcheck disable=SC1090
 eval "$NAME_DEFAULTS"
 
 CLUSTER_NAME="${TF_VAR_cluster_name:-$cluster_name_default}"
