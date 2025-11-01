@@ -2,21 +2,12 @@ provider "aws" {
   region = var.region
 
   assume_role {
-    role_arn = var.assume_role_arn != null ? var.assume_role_arn : ""
+    role_arn = coalesce(var.assume_role_arn, "arn:aws:iam::640168415309:role/MSK-Builder")
     # tags = { AccessScope = "team-x" }  # if your org uses ABAC session tags
   }
 
   default_tags {
     tags = var.tags
-  }
-}
-
-provider "aws" {
-  alias  = "untagged"
-  region = var.region
-
-  assume_role {
-    role_arn = var.assume_role_arn != null ? var.assume_role_arn : ""
   }
 }
 
