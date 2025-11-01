@@ -89,11 +89,74 @@ jobs:
           TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
           TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
-      - name: Detect backend bucket region
+      - name: Validate backend config (skip invalid)
         if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
         run: |
           set -euo pipefail
-          BUCKET=$(awk -F'=' '/^[[:space:]]*bucket[[:space:]]*=/{gsub(/[#].*$/,""); v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/"/ , "", v); print v}' "${TF_BACKEND_FILE}" || true)
+          FILE="${TF_BACKEND_FILE}"
+          # Consider the file invalid if it lacks bucket/key assignments
+          if ! grep -Eq '^[[:space:]]*(bucket|key)[[:space:]]*=' "$FILE"; then
+            echo "::notice::Invalid backend config in $FILE; removing so init can use default/backend args."
+            rm -f "$FILE"
+          fi
+
+      - name: Read backend from versions.tf (fallback)
+        if: ${{ hashFiles(env.TF_BACKEND_FILE) == '' }}
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          workdir = os.environ.get('TF_WORKING_DIR', '.') or '.'
+          path = os.path.join(workdir, 'versions.tf')
+          if not os.path.isfile(path):
+              sys.exit(0)
+          content = open(path, 'r', encoding='utf-8').read()
+          # Find backend "s3" block
+          m = re.search(r'backend\s+"s3"\s*\{', content)
+          if not m:
+              sys.exit(0)
+          i = m.end()
+          depth = 1
+          kv = {}
+          while i < len(content) and depth > 0:
+              ch = content[i]
+              if ch == '{':
+                  depth += 1
+              elif ch == '}':
+                  depth -= 1
+              i += 1
+              if depth == 0:
+                  break
+          block = content[m.end():i-1]
+          for line in block.splitlines():
+              line = line.split('#',1)[0].strip()
+              if not line or '=' not in line:
+                  continue
+              k, v = line.split('=', 1)
+              k = k.strip()
+              v = v.strip().strip('"')
+              if k in {'bucket','key','region','dynamodb_table'}:
+                  kv[k] = v
+          env_path = os.environ.get('GITHUB_ENV')
+          if env_path:
+              with open(env_path, 'a', encoding='utf-8') as fh:
+                  if 'bucket' in kv:
+                      fh.write(f"TF_BACKEND_BUCKET={kv['bucket']}\n")
+                  if 'key' in kv:
+                      fh.write(f"TF_BACKEND_KEY={kv['key']}\n")
+                  if 'region' in kv:
+                      fh.write(f"TF_BACKEND_REGION={kv['region']}\n")
+                  if 'dynamodb_table' in kv:
+                      fh.write(f"TF_BACKEND_DYNAMODB_TABLE={kv['dynamodb_table']}\n")
+          PY
+
+      - name: Detect backend bucket region
+        if: ${{ env.TF_BACKEND_BUCKET != '' || hashFiles(env.TF_BACKEND_FILE) != '' }}
+        run: |
+          set -euo pipefail
+          BUCKET="${TF_BACKEND_BUCKET:-}"
+          if [ -z "${BUCKET}" ] && [ -s "${TF_BACKEND_FILE}" ]; then
+            BUCKET=$(awk -F'=' '/^[[:space:]]*bucket[[:space:]]*=/{gsub(/[#].*$/,""); v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/"/ , "", v); print v}' "${TF_BACKEND_FILE}" || true)
+          fi
           if [ -n "${BUCKET}" ]; then
             REGION=$(aws s3api get-bucket-location --bucket "${BUCKET}" --query 'LocationConstraint' --output text 2>/dev/null || true)
             if [ "${REGION}" = "None" ] || [ -z "${REGION}" ]; then REGION="${AWS_REGION_EFFECTIVE:-${AWS_REGION:-us-east-1}}"; fi

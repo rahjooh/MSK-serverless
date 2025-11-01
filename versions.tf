@@ -16,7 +16,7 @@ terraform {
     bucket  = "test-raw-databucket"
     key     = "terraform/cluster/terraform.tfstate"
     region  = "ap-south-1"
-    encrypt = true
+    encrypt = false
     # no dynamodb_table
   }
 }
