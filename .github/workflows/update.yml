@@ -331,5 +331,7 @@ jobs:
       - name: Update remote Terraform state
         run: bash scripts/rebuild-tfstate.sh
         env:
-          # Prevent provider-level re-assume during CI state rebuild
-          TF_CLI_ARGS: -var=assume_role_arn=""
+          # Prevent provider-level re-assume during CI state rebuild, but only for
+          # commands that accept -var (avoid breaking init/import)
+          TF_CLI_ARGS_apply: -var=assume_role_arn=""
+          TF_CLI_ARGS_plan: -var=assume_role_arn=""
