@@ -96,7 +96,7 @@ jobs:
           BUCKET=$(awk -F'=' '/^[[:space:]]*bucket[[:space:]]*=/{gsub(/[#].*$/,""); v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/"/ , "", v); print v}' "${TF_BACKEND_FILE}" || true)
           if [ -n "${BUCKET}" ]; then
             REGION=$(aws s3api get-bucket-location --bucket "${BUCKET}" --query 'LocationConstraint' --output text 2>/dev/null || true)
-            if [ "${REGION}" = "None" ] || [ -z "${REGION}" ]; then REGION=us-east-1; fi
+            if [ "${REGION}" = "None" ] || [ -z "${REGION}" ]; then REGION="${AWS_REGION_EFFECTIVE:-${AWS_REGION:-us-east-1}}"; fi
             echo "TF_BACKEND_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
             echo "TF_BACKEND_REGION=${REGION}" >> "$GITHUB_ENV"
           fi
@@ -173,14 +173,20 @@ jobs:
           backend_assignments = parse_assignments(os.environ.get('TF_BACKEND_FILE'), {
               'bucket', 'key', 'region', 'dynamodb_table'
           })
+          # Prefer previously detected backend region (from the prior step)
+          detected_backend_region = os.environ.get('TF_BACKEND_REGION')
+
           for key, env_name in (
               ('bucket', 'TF_BACKEND_BUCKET'),
               ('key', 'TF_BACKEND_KEY'),
-              ('region', 'TF_BACKEND_REGION'),
               ('dynamodb_table', 'TF_BACKEND_DYNAMODB_TABLE'),
           ):
               if key in backend_assignments:
                   emit_env(env_name, normalize(backend_assignments[key]))
+
+          # Only export region from file if a detected region is not already set
+          if 'region' in backend_assignments and not detected_backend_region:
+              emit_env('TF_BACKEND_REGION', normalize(backend_assignments['region']))
 
           tfvars_assignments = parse_assignments(os.environ.get('TF_VARS_FILE'), {
               'region',
@@ -214,14 +220,24 @@ jobs:
           TF_VARS_FILE: ${{ env.TF_VARS_FILE }}
       - name: Terraform init
         run: |
-          if [ -s "${TF_BACKEND_FILE}" ]; then \
-            if [ -n "${TF_BACKEND_REGION}" ]; then \
-              terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false -backend-config="${TF_BACKEND_FILE}" -backend-config="region=${TF_BACKEND_REGION}"; \
-            else \
-              terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false -backend-config="${TF_BACKEND_FILE}"; \
-            fi; \
-          else \
-            terraform -chdir=${{ env.TF_WORKING_DIR }} init -input=false; \
+          set -euo pipefail
+          WORKDIR="${{ env.TF_WORKING_DIR }}"
+          REGION="${TF_BACKEND_REGION:-${AWS_REGION_EFFECTIVE:-${AWS_REGION:-}}}"
+          if [ -n "${TF_BACKEND_BUCKET:-}" ] && [ -n "${TF_BACKEND_KEY:-}" ]; then
+            ARGS=( -input=false -reconfigure \
+              "-backend-config=bucket=${TF_BACKEND_BUCKET}" \
+              "-backend-config=key=${TF_BACKEND_KEY}" )
+            if [ -n "${REGION}" ]; then ARGS+=( "-backend-config=region=${REGION}" ); fi
+            if [ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]; then ARGS+=( "-backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" ); fi
+            terraform -chdir="${WORKDIR}" init "${ARGS[@]}"
+          elif [ -s "${TF_BACKEND_FILE}" ]; then
+            if [ -n "${REGION}" ]; then
+              terraform -chdir="${WORKDIR}" init -input=false -backend-config="${TF_BACKEND_FILE}" -backend-config="region=${REGION}"
+            else
+              terraform -chdir="${WORKDIR}" init -input=false -backend-config="${TF_BACKEND_FILE}"
+            fi
+          else
+            terraform -chdir="${WORKDIR}" init -input=false
           fi
 
       - name: Check Terraform state contents

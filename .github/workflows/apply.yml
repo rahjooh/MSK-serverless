@@ -131,7 +131,7 @@ jobs:
             if REGION_RAW=$(aws s3api get-bucket-location --bucket "${BUCKET}" --query 'LocationConstraint' --output text 2>/dev/null); then
               REGION="$REGION_RAW"
               # AWS returns "None" specifically for us-east-1
-              if [ "${REGION}" = "None" ]; then REGION=us-east-1; fi
+              if [ "${REGION}" = "None" ] || [ -z "${REGION}" ]; then REGION="${AWS_REGION_EFFECTIVE:-${AWS_REGION:-us-east-1}}"; fi
               echo "TF_BACKEND_REGION=${REGION}" >> "$GITHUB_ENV"
             else
               echo "::notice::Could not determine S3 bucket region for '${BUCKET}'. Backend region will not be overridden." >&2
@@ -149,9 +149,15 @@ jobs:
 
       - name: Terraform init (via Makefile)
         run: |
-          if [ -s "${TF_BACKEND_FILE}" ]; then \
+          REGION="${TF_BACKEND_REGION:-${AWS_REGION_EFFECTIVE:-${AWS_REGION:-}}}"
+          if [ -n "${TF_BACKEND_BUCKET:-}" ] && [ -n "${TF_BACKEND_KEY:-}" ]; then \
+            ARGS="-backend-config=bucket=${TF_BACKEND_BUCKET} -backend-config=key=${TF_BACKEND_KEY}"; \
+            if [ -n "${REGION}" ]; then ARGS="$ARGS -backend-config=region=${REGION}"; fi; \
+            if [ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]; then ARGS="$ARGS -backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}"; fi; \
+            make INIT_ARGS="$ARGS" init; \
+          elif [ -s "${TF_BACKEND_FILE}" ]; then \
             if [ -n "${TF_BACKEND_REGION}" ]; then \
-              make INIT_ARGS="-backend-config=${TF_BACKEND_FILE} -backend-config=region=${TF_BACKEND_REGION}" init; \
+              make INIT_ARGS="-backend-config=${TF_BACKEND_FILE} -backend-config=region=${REGION}" init; \
             else \
               make INIT_ARGS="-backend-config=${TF_BACKEND_FILE}" init; \
             fi; \
