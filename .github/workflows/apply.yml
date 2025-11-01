@@ -126,10 +126,17 @@ jobs:
           set -euo pipefail
           BUCKET=$(awk -F'=' '/^[[:space:]]*bucket[[:space:]]*=/{gsub(/[#].*$/,""); v=$2; gsub(/^[[:space:]]+|[[:space:]]+$/,"",v); gsub(/"/ , "", v); print v}' "${TF_BACKEND_FILE}" || true)
           if [ -n "${BUCKET}" ]; then
-            REGION=$(aws s3api get-bucket-location --bucket "${BUCKET}" --query 'LocationConstraint' --output text 2>/dev/null || true)
-            if [ "${REGION}" = "None" ] || [ -z "${REGION}" ]; then REGION=us-east-1; fi
+            REGION=""
+            # Try to detect the bucket's actual region. Only override when detection succeeds.
+            if REGION_RAW=$(aws s3api get-bucket-location --bucket "${BUCKET}" --query 'LocationConstraint' --output text 2>/dev/null); then
+              REGION="$REGION_RAW"
+              # AWS returns "None" specifically for us-east-1
+              if [ "${REGION}" = "None" ]; then REGION=us-east-1; fi
+              echo "TF_BACKEND_REGION=${REGION}" >> "$GITHUB_ENV"
+            else
+              echo "::notice::Could not determine S3 bucket region for '${BUCKET}'. Backend region will not be overridden." >&2
+            fi
             echo "TF_BACKEND_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
-            echo "TF_BACKEND_REGION=${REGION}" >> "$GITHUB_ENV"
           fi
 
       - name: Download terraform.tfvars from S3 (optional)
