@@ -76,6 +76,15 @@ jobs:
           AWS_SECRET_ACCESS_KEY_INPUT: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
           AWS_SESSION_TOKEN_INPUT: ${{ secrets.AWS_SESSION_TOKEN || '' }}
 
+      - name: Avoid double assume (clear TF_VAR_assume_role_arn when GH already assumed)
+        if: ${{ env.ASSUME_ROLE_ARN != '' }}
+        run: |
+          {
+            echo "TF_VAR_assume_role_arn<<EOF";
+            echo "";
+            echo "EOF";
+          } >> "$GITHUB_ENV"
+
       - name: Materialize tfvars from secret
         if: ${{ env.TFVARS_CONTENT != '' }}
         run: |
