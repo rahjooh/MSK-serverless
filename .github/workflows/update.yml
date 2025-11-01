@@ -1,4 +1,4 @@
-name: Update Terraform state
+name: Update
 
 on:
   workflow_dispatch:
@@ -328,6 +328,11 @@ jobs:
       - name: Show Terraform version
         run: terraform version
 
+      - name: Preflight AWS identity
+        run: |
+          echo "Region: ${AWS_REGION_EFFECTIVE:-$AWS_REGION}"
+          aws sts get-caller-identity
+
       - name: Update remote Terraform state
         run: bash scripts/rebuild-tfstate.sh
         env:
@@ -335,3 +340,4 @@ jobs:
           # commands that accept -var (avoid breaking init/import)
           TF_CLI_ARGS_apply: -var=assume_role_arn=""
           TF_CLI_ARGS_plan: -var=assume_role_arn=""
+          STATE_DEBUG: 1

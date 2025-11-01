@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Optional verbose debugging
+if [ "${STATE_DEBUG:-}" = "1" ]; then
+  set -x
+fi
+
 if ! command -v terraform >/dev/null 2>&1; then
   if [ -n "${TERRAFORM_CLI_PATH:-}" ]; then
     if [ -d "$TERRAFORM_CLI_PATH" ]; then
