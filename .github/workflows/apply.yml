@@ -277,10 +277,15 @@ jobs:
       - name: Terraform apply (use existing if found)
         if: ${{ env.USE_EXISTING == 'true' }}
         run: make apply-use-existing
+        env:
+          # Ensure provider does not re-assume a role inside Terraform in CI
+          APPLY_ARGS: -auto-approve -var=assume_role_arn=""
 
       - name: Terraform apply (fresh)
         if: ${{ env.USE_EXISTING != 'true' }}
         run: make apply
+        env:
+          APPLY_ARGS: -auto-approve -var=assume_role_arn=""
 
       - name: Save infrastructure summary
         run: terraform -chdir=${{ env.TF_WORKING_DIR }} output -json infrastructure_summary_json > resources.json

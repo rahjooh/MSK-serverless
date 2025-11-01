@@ -340,9 +340,9 @@ jobs:
       - name: Terraform destroy
         run: |
           if [ -f "${{ env.TF_VARS_FILE }}" ]; then
-            terraform -chdir=${{ env.TF_WORKING_DIR }} destroy -auto-approve -input=false -var-file="${{ env.TF_VARS_FILE }}"
+            terraform -chdir=${{ env.TF_WORKING_DIR }} destroy -auto-approve -input=false -var=assume_role_arn="" -var-file="${{ env.TF_VARS_FILE }}"
           else
-            terraform -chdir=${{ env.TF_WORKING_DIR }} destroy -auto-approve -input=false
+            terraform -chdir=${{ env.TF_WORKING_DIR }} destroy -auto-approve -input=false -var=assume_role_arn=""
           fi
 
       - name: Save post-destroy summary
