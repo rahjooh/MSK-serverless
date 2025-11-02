@@ -113,7 +113,7 @@ jobs:
           aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
           role-duration-seconds: 3600
           role-skip-session-tagging: true
-                    aws-access-key-id: ''
+          aws-access-key-id: ''
           aws-secret-access-key: ''
           aws-session-token: ''
 

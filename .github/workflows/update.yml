@@ -100,7 +100,8 @@ jobs:
           aws-session-token: ''
 
       - name: Validate AWS credential configuration
-        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}        run: |
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}
+        run: |
           echo "::error::Set assume_role_arn in the TERRAFORM_TFVARS secret so the update workflow can assume AWS credentials."
 
       - name: Show Terraform version
