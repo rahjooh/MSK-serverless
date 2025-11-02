@@ -1,6 +1,9 @@
 # Local .terraform directories
 **/.terraform/*
 
+.idea/
+.idea/*
+
 #  Ignore variables files
 *.auto.tfvars
 *.tfvars
