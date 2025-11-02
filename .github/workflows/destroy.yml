@@ -115,7 +115,7 @@ jobs:
           echo "::error::Set assume_role_arn in the TERRAFORM_TFVARS secret so the workflow can assume AWS credentials."
           exit 1
 
-        - name: Detect backend bucket region
+      - name: Detect backend bucket region
         if: ${{ env.TF_BACKEND_BUCKET != '' || hashFiles(env.TF_BACKEND_FILE) != '' }}
         run: |
           set -euo pipefail
