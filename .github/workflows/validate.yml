@@ -27,9 +27,6 @@ env:
   PLAN_FILE: plan.out
   TF_VARS_FILE: ci.auto.tfvars
   TF_BACKEND_FILE: backend.auto.tfbackend
-  AWS_REGION: ap-south-1
-  INFRA_SUMMARY_BUCKET: test-raw-databucket
-  INFRA_SUMMARY_KEY: terraform/cluster/resources.json
 
 jobs:
   validate:
@@ -44,59 +41,85 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Resolve runtime configuration
-        run: |
-          {
-            echo "ASSUME_ROLE_ARN<<EOF";
-            echo "${ASSUME_ROLE_ARN}";
-            echo "EOF";
-            echo "AWS_REGION_EFFECTIVE<<EOF";
-            echo "${AWS_REGION_INPUT}";
-            echo "EOF";
-            echo "TFVARS_CONTENT<<EOF";
-            echo "${TFVARS}";
-            echo "EOF";
-            echo "TF_BACKEND_CONTENT<<EOF";
-            echo "${TF_BACKEND_CONFIG}";
-            echo "EOF";
-            echo "AWS_ACCESS_KEY_ID<<EOF";
-            echo "${AWS_ACCESS_KEY_ID_INPUT}";
-            echo "EOF";
-            echo "AWS_SECRET_ACCESS_KEY<<EOF";
-            echo "${AWS_SECRET_ACCESS_KEY_INPUT}";
-            echo "EOF";
-            echo "AWS_SESSION_TOKEN<<EOF";
-            echo "${AWS_SESSION_TOKEN_INPUT}";
-            echo "EOF";
-            echo "AWS_DEFAULT_REGION<<EOF";
-            echo "${AWS_REGION_INPUT}";
-            echo "EOF";
-          } >> "$GITHUB_ENV"
+      - name: Load Terraform configuration
+        run: python3 scripts/load_terraform_config.py
         env:
-          ASSUME_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN || '' }}
-          AWS_REGION_INPUT: ${{ secrets.AWS_REGION || vars.AWS_REGION || env.AWS_REGION }}
-          TFVARS: ${{ secrets.TERRAFORM_TFVARS || '' }}
-          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG || vars.TF_BACKEND_CONFIG || '' }}
-          AWS_ACCESS_KEY_ID_INPUT: ${{ secrets.AWS_ACCESS_KEY_ID || '' }}
-          AWS_SECRET_ACCESS_KEY_INPUT: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
-          AWS_SESSION_TOKEN_INPUT: ${{ secrets.AWS_SESSION_TOKEN || '' }}
+          TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
 
-      - name: Materialize tfvars from secret
-        if: ${{ env.TFVARS_CONTENT != '' }}
+      - name: Validate backend config (skip invalid)
+        if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
         run: |
-          printf '%s\n' "${TFVARS_CONTENT}" > "${TF_VARS_FILE}"
-          terraform fmt "${TF_VARS_FILE}"
-        env:
-          TFVARS_CONTENT: ${{ env.TFVARS_CONTENT }}
-          TF_VARS_FILE: ${{ env.TF_VARS_FILE }}
+          set -euo pipefail
+          FILE="${TF_BACKEND_FILE}"
+          if ! grep -Eq '^[[:space:]]*(bucket|key)[[:space:]]*=' "$FILE"; then
+            echo "::notice::Invalid backend config in $FILE; removing so init can use default/backend args."
+            rm -f "$FILE"
+          fi
 
-      - name: Materialize backend config from secrets/vars
-        if: ${{ env.TF_BACKEND_CONTENT != '' }}
+      - name: Read backend from versions.tf (fallback)
+        if: ${{ hashFiles(env.TF_BACKEND_FILE) == '' }}
         run: |
-          printf '%s\n' "${TF_BACKEND_CONTENT}" > "${TF_BACKEND_FILE}"
-        env:
-          TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
-          TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
+          python3 - <<'PY'
+          import os, re, sys
+          path = os.path.join(os.environ.get('TF_WORKING_DIR', '.') or '.', 'versions.tf')
+          if not os.path.isfile(path):
+              sys.exit(0)
+          content = open(path, 'r', encoding='utf-8').read()
+          m = re.search(r'backend\s+"s3"\s*\{', content)
+          if not m:
+              sys.exit(0)
+          i = m.end()
+          depth = 1
+          kv = {}
+          while i < len(content) and depth > 0:
+              ch = content[i]
+              if ch == '{':
+                  depth += 1
+              elif ch == '}':
+                  depth -= 1
+              i += 1
+              if depth == 0:
+                  break
+          block = content[m.end():i-1]
+          for raw in block.splitlines():
+              line = raw.split('#',1)[0].strip()
+              if not line or '=' not in line:
+                  continue
+              k, v = line.split('=', 1)
+              k = k.strip()
+              v = v.strip().strip('"')
+              if k in {'bucket','key','region','dynamodb_table'}:
+                  kv[k] = v
+          env_path = os.environ.get('GITHUB_ENV')
+          if env_path:
+              with open(env_path, 'a', encoding='utf-8') as fh:
+                  if 'bucket' in kv:
+                      fh.write(f"TF_BACKEND_BUCKET={kv['bucket']}\n")
+                  if 'key' in kv:
+                      fh.write(f"TF_BACKEND_KEY={kv['key']}\n")
+                  if 'region' in kv:
+                      fh.write(f"TF_BACKEND_REGION={kv['region']}\n")
+                  if 'dynamodb_table' in kv:
+                      fh.write(f"TF_BACKEND_DYNAMODB_TABLE={kv['dynamodb_table']}\n")
+          PY
+
+      - name: Configure AWS credentials (assume role)
+        if: ${{ env.ASSUME_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ASSUME_ROLE_ARN }}
+          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+          role-duration-seconds: 3600
+          role-skip-session-tagging: true
+          aws-access-key-id: ''
+          aws-secret-access-key: ''
+          aws-session-token: ''
+
+      - name: Validate AWS credential configuration
+        if: ${{ env.ASSUME_ROLE_ARN == '' }}
+        run: |
+          echo "::error::Set assume_role_arn in the TERRAFORM_TFVARS secret so the workflow can assume AWS credentials."
+          exit 1
 
       - name: Terraform fmt
         run: terraform -chdir=${{ env.TF_WORKING_DIR }} fmt -check -recursive

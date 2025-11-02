@@ -17,12 +17,6 @@ env:
   PLAN_FILE: plan.out
   TF_VARS_FILE: ci.auto.tfvars
   TF_BACKEND_FILE: backend.auto.tfbackend
-  AWS_REGION: ap-south-1
-  INFRA_SUMMARY_BUCKET: test-raw-databucket
-  INFRA_SUMMARY_KEY: terraform/cluster/resources.json
-  USE_EXISTING: 'true'
-  S3_TFVARS_BUCKET: ${{ secrets.S3_TFVARS_BUCKET || vars.S3_TFVARS_BUCKET || '' }}
-  S3_TFVARS_KEY: ${{ secrets.S3_TFVARS_KEY || vars.S3_TFVARS_KEY || '' }}
 
 jobs:
   apply:
@@ -39,42 +33,10 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Resolve runtime configuration
-        run: |
-          {
-            echo "ASSUME_ROLE_ARN<<EOF";
-            echo "${ASSUME_ROLE_ARN}";
-            echo "EOF";
-            echo "AWS_REGION_EFFECTIVE<<EOF";
-            echo "${AWS_REGION_INPUT}";
-            echo "EOF";
-            echo "TFVARS_CONTENT<<EOF";
-            echo "${TFVARS}";
-            echo "EOF";
-            echo "TF_BACKEND_CONTENT<<EOF";
-            echo "${TF_BACKEND_CONFIG}";
-            echo "EOF";
-            echo "AWS_ACCESS_KEY_ID<<EOF";
-            echo "${AWS_ACCESS_KEY_ID_INPUT}";
-            echo "EOF";
-            echo "AWS_SECRET_ACCESS_KEY<<EOF";
-            echo "${AWS_SECRET_ACCESS_KEY_INPUT}";
-            echo "EOF";
-            echo "AWS_SESSION_TOKEN<<EOF";
-            echo "${AWS_SESSION_TOKEN_INPUT}";
-            echo "EOF";
-            echo "AWS_DEFAULT_REGION<<EOF";
-            echo "${AWS_REGION_INPUT}";
-            echo "EOF";
-          } >> "$GITHUB_ENV"
+      - name: Load Terraform configuration
+        run: python3 scripts/load_terraform_config.py
         env:
-          ASSUME_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN || vars.AWS_ROLE_ARN || '' }}
-          AWS_REGION_INPUT: ${{ secrets.AWS_REGION || vars.AWS_REGION || env.AWS_REGION }}
-          TFVARS: ${{ secrets.TERRAFORM_TFVARS || '' }}
-          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG || vars.TF_BACKEND_CONFIG || '' }}
-          AWS_ACCESS_KEY_ID_INPUT: ${{ secrets.AWS_ACCESS_KEY_ID || '' }}
-          AWS_SECRET_ACCESS_KEY_INPUT: ${{ secrets.AWS_SECRET_ACCESS_KEY || '' }}
-          AWS_SESSION_TOKEN_INPUT: ${{ secrets.AWS_SESSION_TOKEN || '' }}
+          TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
 
       - name: Avoid double assume (clear TF_VAR_assume_role_arn when GH already assumed)
         if: ${{ env.ASSUME_ROLE_ARN != '' }}
@@ -84,23 +46,6 @@ jobs:
             echo "";
             echo "EOF";
           } >> "$GITHUB_ENV"
-
-      - name: Materialize tfvars from secret
-        if: ${{ env.TFVARS_CONTENT != '' }}
-        run: |
-          printf '%s\n' "${TFVARS_CONTENT}" > "${TF_VARS_FILE}"
-          terraform fmt "${TF_VARS_FILE}"
-        env:
-          TFVARS_CONTENT: ${{ env.TFVARS_CONTENT }}
-          TF_VARS_FILE: ${{ env.TF_VARS_FILE }}
-
-      - name: Materialize backend config from secrets/vars
-        if: ${{ env.TF_BACKEND_CONTENT != '' }}
-        run: |
-          printf '%s\n' "${TF_BACKEND_CONTENT}" > "${TF_BACKEND_FILE}"
-        env:
-          TF_BACKEND_CONTENT: ${{ env.TF_BACKEND_CONTENT }}
-          TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
 
       - name: Validate backend config (skip invalid)
         if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
@@ -168,23 +113,14 @@ jobs:
           aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
           role-duration-seconds: 3600
           role-skip-session-tagging: true
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
-
-      - name: Configure AWS credentials (static)
-        if: ${{ env.ASSUME_ROLE_ARN == '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
+                    aws-access-key-id: ''
+          aws-secret-access-key: ''
+          aws-session-token: ''
 
       - name: Validate AWS credential configuration
-        if: ${{ env.ASSUME_ROLE_ARN == '' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '') }}
+        if: ${{ env.ASSUME_ROLE_ARN == '' }}
         run: |
-          echo "::error::AWS credentials are not configured. Provide ASSUME_ROLE_ARN (optionally with access keys for source credentials) or supply AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
+          echo "::error::Set assume_role_arn in the TERRAFORM_TFVARS secret so the workflow can assume AWS credentials."
           exit 1
 
       - name: Detect backend bucket region
@@ -208,14 +144,6 @@ jobs:
             fi
             echo "TF_BACKEND_BUCKET=${BUCKET}" >> "$GITHUB_ENV"
           fi
-
-      - name: Download terraform.tfvars from S3 (optional)
-        if: ${{ env.S3_TFVARS_BUCKET != '' && env.S3_TFVARS_KEY != '' }}
-        run: |
-          aws s3 cp "s3://${S3_TFVARS_BUCKET}/${S3_TFVARS_KEY}" terraform.tfvars
-          # also mirror to auto tfvars so Terraform loads it implicitly
-          cp terraform.tfvars "${TF_VARS_FILE}" || true
-          terraform fmt terraform.tfvars || true
 
       - name: Terraform init (via Makefile)
         run: |

@@ -206,7 +206,7 @@ If you set `assume_role_arn`, make sure the base credentials have permission to 
    - Configure GitHub’s OIDC provider to assume the existing `MSK-Builder` role instead of checking in long-lived AWS access keys.
    - If environments use different roles, surface a variable such as `assume_role_arn` and feed it from environment or repository secrets.
 5. **Securely pass variables and secrets**
-   - Store real `.tfvars` files or sensitive variables (region, subnets, topic prefixes, permission-boundary ARN) as encrypted secrets and supply them with `-var-file`/`-var` at runtime.
+   - Store environment-specific values in the `TERRAFORM_TFVARS` secret using the same HCL syntax that Terraform expects in a `.tfvars` file. Optional `# workflow.<key> = <value>` comments inside that payload let CI read GitHub-only settings (backend bucket, assume-role ARN, summary destinations) without introducing extra repository secrets.
 6. **Centralize Terraform state**
    - Point Terraform at a remote backend (e.g., S3 with DynamoDB locking) so concurrent runs do not clash on local state.
    - Use separate backends or workspaces per environment and restrict who can trigger production applies.
@@ -225,7 +225,49 @@ The `.github/workflows/terraform.yml` pipeline implements the guidance above wit
 | `report` | Publishes `terraform output` values to the workflow summary after a successful apply so stakeholders can see new infrastructure details. |
 | `destroy` | Provides an on-demand teardown path that requires the same approvals as apply. |
 
-To feed environment-specific variables, store an HCL snippet in the `TERRAFORM_TFVARS` secret (for example, the contents of your `example.tfvars`) so each job can materialize a temporary `ci.auto.tfvars` at runtime. Set `AWS_ROLE_ARN`/`AWS_REGION` secrets (or environment-level equivalents) to let the workflow assume the correct IAM role via GitHub’s OIDC federation.
+To feed environment-specific variables, store the exact contents of your `.tfvars` file in the encrypted `TERRAFORM_TFVARS` secret. The loader writes the payload to `ci.auto.tfvars` for Terraform and exports matching `TF_VAR_` environment variables for CLIs that prefer them. Because the payload is native HCL, you can copy it directly to `terraform.tfvars` for local runs.
+
+Optional CI-only settings can be provided through comment directives that start with `# workflow.` or `// workflow.`. Supported directives include:
+
+- `workflow.backend.bucket`, `workflow.backend.key`, `workflow.backend.region`, `workflow.backend.dynamodb_table`
+- `workflow.summary.bucket`, `workflow.summary.key`
+- `workflow.use_existing`
+
+Example secret value:
+
+```hcl
+region          = "ap-south-1"
+assume_role_arn = "arn:aws:iam::123456789012:role/MSK-Builder"
+
+vpc_id     = "vpc-0abc123def4567890"
+subnet_ids = [
+  "subnet-0aaabbbbcccc11111",
+  "subnet-0ddddeeeeffff22222",
+]
+
+producer_topic_prefixes = ["exchg.", "trades."]
+consumer_topic_prefixes = ["exchg."]
+consumer_group_names    = ["team-quant", "team-research"]
+
+tags = {
+  Project = "Data"
+  Owner   = "Hadi"
+  Env     = "prod"
+}
+
+log_retention_days = 3
+log_kms_key_arn    = null
+
+# workflow.backend.bucket = "terraform-state-bucket"
+# workflow.backend.key    = "cluster/prod/terraform.tfstate"
+# workflow.backend.region = "ap-south-1"
+# workflow.summary.bucket = "msk-cluster-reports"
+# workflow.summary.key    = "terraform/cluster/resources.json"
+# workflow.use_existing   = true
+```
+
+Omit any directives you do not need. The loader gracefully falls back to repository defaults when optional settings (such as the summary location) are absent.
+
 
 ### Rebuilding state after corruption
 
@@ -238,8 +280,8 @@ If the remote Terraform state stored in S3 is ever lost or corrupted, trigger th
 
 To run the workflow:
 
-- Store the AWS federation role to assume in the `AWS_ASSUME_ROLE_ARN` secret (or update the workflow to suit your credential model).
-- Provide the minimum required Terraform variables as repository/environment secrets so the importer can evaluate the configuration—specifically `TF_VAR_REGION`, `TF_VAR_VPC_ID`, and `TF_VAR_SUBNET_IDS` (encoded as a JSON array, e.g. `["subnet-123","subnet-456"]`). Optional overrides such as custom names or tags can also be supplied via the corresponding `TF_VAR_*` secrets shown in the workflow.
+- Ensure the `assume_role_arn` variable inside `TERRAFORM_TFVARS` points to the AWS role that should import the stack (adjust the workflow if you require a different credential model).
+- Provide the minimum required Terraform variables in that same payload—specifically `region`, `vpc_id`, and `subnet_ids`. Optional overrides such as custom names or tags can also live alongside those variables.
 - From the Actions tab choose **Rebuild Terraform state**, supply the S3 bucket, object key, backend region, and (optionally) the DynamoDB table used for state locking, then start the run.
 
 > The importer is idempotent: rerunning it simply reaffirms the existing mappings. Always review the terminal plan output before resuming regular Terraform changes to confirm no drift remains.

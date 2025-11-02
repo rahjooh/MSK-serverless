@@ -16,24 +16,6 @@ jobs:
   update:
     name: Import existing AWS resources into Terraform state
     runs-on: ubuntu-latest
-    env:
-      TF_VAR_region: ${{ secrets.TF_VAR_REGION || vars.TF_VAR_REGION || '' }}
-      TF_VAR_vpc_id: ${{ secrets.TF_VAR_VPC_ID || vars.TF_VAR_VPC_ID || '' }}
-      TF_VAR_subnet_ids: ${{ secrets.TF_VAR_SUBNET_IDS || vars.TF_VAR_SUBNET_IDS || '' }}
-      TF_VAR_assume_role_arn: ${{ secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
-      AWS_ASSUME_ROLE_ARN: ${{ secrets.AWS_ASSUME_ROLE_ARN || secrets.TF_VAR_ASSUME_ROLE_ARN || vars.TF_VAR_ASSUME_ROLE_ARN || '' }}
-      TF_VAR_log_kms_key_arn: ${{ secrets.TF_VAR_LOG_KMS_KEY_ARN || vars.TF_VAR_LOG_KMS_KEY_ARN || '' }}
-      TF_VAR_collector_sg_name: ${{ secrets.TF_VAR_COLLECTOR_SG_NAME || vars.TF_VAR_COLLECTOR_SG_NAME || '' }}
-      TF_VAR_consumer_sg_name: ${{ secrets.TF_VAR_CONSUMER_SG_NAME || vars.TF_VAR_CONSUMER_SG_NAME || '' }}
-      TF_VAR_cluster_name: ${{ secrets.TF_VAR_CLUSTER_NAME || vars.TF_VAR_CLUSTER_NAME || '' }}
-      TF_VAR_tags: ${{ secrets.TF_VAR_TAGS_JSON || vars.TF_VAR_TAGS_JSON || '' }}
-      TF_VAR_producer_topic_prefixes: ${{ secrets.TF_VAR_PRODUCER_TOPIC_PREFIXES || vars.TF_VAR_PRODUCER_TOPIC_PREFIXES || '' }}
-      TF_VAR_consumer_topic_prefixes: ${{ secrets.TF_VAR_CONSUMER_TOPIC_PREFIXES || vars.TF_VAR_CONSUMER_TOPIC_PREFIXES || '' }}
-      TF_VAR_consumer_group_names: ${{ secrets.TF_VAR_CONSUMER_GROUP_NAMES || vars.TF_VAR_CONSUMER_GROUP_NAMES || '' }}
-      TF_VAR_collector_sg_egress_cidrs: ${{ secrets.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS || vars.TF_VAR_COLLECTOR_SG_EGRESS_CIDRS || '' }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID || vars.AWS_ACCESS_KEY_ID || '' }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY || vars.AWS_SECRET_ACCESS_KEY || '' }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN || vars.AWS_SESSION_TOKEN || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,38 +25,10 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
-      - name: Resolve runtime configuration
-        run: |
-          {
-            echo "TFVARS_CONTENT<<EOF";
-            echo "${TFVARS}";
-            echo "EOF";
-            echo "TF_BACKEND_CONTENT<<EOF";
-            echo "${TF_BACKEND_CONFIG}";
-            echo "EOF";
-            EFFECTIVE_REGION="${AWS_REGION_INPUT:-${TF_VAR_region}}";
-            echo "AWS_REGION<<EOF";
-            echo "${EFFECTIVE_REGION}";
-            echo "EOF";
-            echo "AWS_REGION_EFFECTIVE<<EOF";
-            echo "${EFFECTIVE_REGION}";
-            echo "EOF";
-          } >> "$GITHUB_ENV"
+      - name: Load Terraform configuration
+        run: python3 scripts/load_terraform_config.py
         env:
-          TFVARS: ${{ secrets.TERRAFORM_TFVARS || '' }}
-          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG || vars.TF_BACKEND_CONFIG || '' }}
-          AWS_REGION_INPUT: ${{ secrets.AWS_REGION || vars.AWS_REGION || '' }}
-
-      - name: Materialize tfvars from secret
-        if: ${{ env.TFVARS_CONTENT != '' }}
-        run: |
-          printf '%s\n' "${TFVARS_CONTENT}" > "${TF_VARS_FILE}"
-          terraform fmt "${TF_VARS_FILE}"
-
-      - name: Materialize backend config from secret
-        if: ${{ env.TF_BACKEND_CONTENT != '' }}
-        run: |
-          printf '%s\n' "${TF_BACKEND_CONTENT}" > "${TF_BACKEND_FILE}"
+          TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
 
       - name: Validate backend config (skip invalid)
         if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
@@ -133,166 +87,6 @@ jobs:
                       fh.write(f"TF_BACKEND_DYNAMODB_TABLE={kv['dynamodb_table']}\n")
           PY
 
-      - name: Export backend settings
-        if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
-        run: |
-          python <<'PY'
-          import os
-          import sys
-
-          path = os.environ.get("TF_BACKEND_FILE")
-          if not path or not os.path.isfile(path):
-              sys.exit(0)
-
-          data = {}
-          with open(path, encoding="utf-8") as fh:
-              for raw_line in fh:
-                  line = raw_line.strip()
-                  if not line or line.startswith("#"):
-                      continue
-                  if "=" not in line:
-                      continue
-                  key, value = line.split("=", 1)
-                  key = key.strip()
-                  # drop inline comments and surrounding quotes
-                  value = value.split('#', 1)[0].strip().strip('"')
-                  data[key] = value
-
-          mapping = {
-              "bucket": "TF_BACKEND_BUCKET",
-              "key": "TF_BACKEND_KEY",
-              "region": "TF_BACKEND_REGION",
-              "dynamodb_table": "TF_BACKEND_DYNAMODB_TABLE",
-          }
-
-          github_env = os.environ["GITHUB_ENV"]
-          with open(github_env, "a", encoding="utf-8") as env_file:
-              for source, target in mapping.items():
-                  value = data.get(source)
-                  if value:
-                      env_file.write(f"{target}={value}\n")
-          PY
-        env:
-          TF_BACKEND_FILE: ${{ env.TF_BACKEND_FILE }}
-
-      - name: Export tfvars settings
-        if: ${{ env.TFVARS_CONTENT != '' }}
-        run: |
-          python <<'PY'
-          import ast
-          import json
-          import os
-          import sys
-
-          tfvars_path = os.environ.get("TF_VARS_FILE")
-          if not tfvars_path or not os.path.isfile(tfvars_path):
-              sys.exit(0)
-
-          allowed = {
-              'region',
-              'vpc_id',
-              'subnet_ids',
-              'cluster_name',
-              'collector_sg_name',
-              'consumer_sg_name',
-          }
-
-          def parse_assignments(path, allowed):
-              result = {}
-              with open(path, 'r', encoding='utf-8') as handle:
-                  lines = handle.readlines()
-              i = 0
-              while i < len(lines):
-                  raw = lines[i]
-                  if '=' not in raw:
-                      i += 1
-                      continue
-                  key, value = raw.split('=', 1)
-                  key = key.strip()
-                  if key not in allowed:
-                      i += 1
-                      continue
-                  value = value.split('#', 1)[0].strip()
-                  if value.startswith('[') and not value.rstrip().endswith(']'):
-                      while i + 1 < len(lines):
-                          i += 1
-                          value += lines[i]
-                          if ']' in lines[i]:
-                              break
-                  result[key] = value
-                  i += 1
-              return result
-
-          def normalize(value):
-              value = value.strip()
-              try:
-                  return ast.literal_eval(value)
-              except Exception:
-                  return value.strip('"')
-
-          github_env = os.environ["GITHUB_ENV"]
-          assignments = parse_assignments(tfvars_path, allowed)
-
-          def emit(name, value):
-              if value is None:
-                  return
-              with open(github_env, 'a', encoding='utf-8') as fh:
-                  fh.write(f"{name}<<EOF\n{value}\nEOF\n")
-
-          mapping = (
-              ('region', 'TF_VAR_region'),
-              ('vpc_id', 'TF_VAR_vpc_id'),
-              ('cluster_name', 'TF_VAR_cluster_name'),
-              ('collector_sg_name', 'TF_VAR_collector_sg_name'),
-              ('consumer_sg_name', 'TF_VAR_consumer_sg_name'),
-          )
-
-          for key, env_name in mapping:
-              if key in assignments:
-                  emit(env_name, normalize(assignments[key]))
-
-          if 'subnet_ids' in assignments:
-              val = normalize(assignments['subnet_ids'])
-              if isinstance(val, (list, tuple)):
-                  serialized = json.dumps(list(val), separators=(',', ':'))
-              else:
-                  serialized = str(val)
-              emit('TF_VAR_subnet_ids', serialized)
-          PY
-
-      - name: Derive AWS assume role configuration
-        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}
-        run: |
-          python <<'PY'
-          import os
-          import re
-
-          arn = os.environ.get("AWS_ASSUME_ROLE_ARN", "").strip()
-          if arn:
-              raise SystemExit(0)
-
-          candidate = os.environ.get("TF_VAR_assume_role_arn", "").strip()
-          if not candidate:
-              tfvars_path = os.environ.get("TF_VARS_FILE", "").strip()
-              if tfvars_path and os.path.isfile(tfvars_path):
-                  with open(tfvars_path, "r", encoding="utf-8") as handle:
-                      content = handle.read()
-                  match = re.search(r"assume_role_arn\s*=\s*\"([^\"]+)\"", content)
-                  if match:
-                      candidate = match.group(1).strip()
-
-          if not candidate:
-              raise SystemExit(0)
-
-          github_env = os.environ.get("GITHUB_ENV")
-          if not github_env:
-              raise SystemExit(0)
-
-          with open(github_env, "a", encoding="utf-8") as env_file:
-              env_file.write("AWS_ASSUME_ROLE_ARN=" + candidate + "\n")
-          PY
-
-
       - name: Configure AWS credentials (assume role)
         if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
         uses: aws-actions/configure-aws-credentials@v4
@@ -301,29 +95,13 @@ jobs:
           aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE }}
           role-duration-seconds: 3600
           role-skip-session-tagging: true
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
-
-      - name: Configure AWS credentials (static)
-        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
-          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE }}
+          aws-access-key-id: ''
+          aws-secret-access-key: ''
+          aws-session-token: ''
 
       - name: Validate AWS credential configuration
-        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' && (env.AWS_ACCESS_KEY_ID == '' || env.AWS_SECRET_ACCESS_KEY == '') }}
-        run: |
-          echo "::error::AWS credentials are not configured. Provide AWS_ASSUME_ROLE_ARN (optionally with access keys for source credentials) or supply AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY."
-          exit 1
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
-        with:
-          terraform_version: 1.6.6
+        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}        run: |
+          echo "::error::Set assume_role_arn in the TERRAFORM_TFVARS secret so the update workflow can assume AWS credentials."
 
       - name: Show Terraform version
         run: terraform version
