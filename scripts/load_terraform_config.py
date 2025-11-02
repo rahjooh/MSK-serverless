@@ -426,9 +426,9 @@ def main() -> None:
     if isinstance(assume_role, str) and assume_role:
         env_lines.append(f"ASSUME_ROLE_ARN={assume_role}")
         env_lines.append(f"AWS_ASSUME_ROLE_ARN={assume_role}")
-    else:
-        env_lines.append("ASSUME_ROLE_ARN=")
-        env_lines.append("AWS_ASSUME_ROLE_ARN=")
+    # else:
+    #     env_lines.append("ASSUME_ROLE_ARN=")
+    #     env_lines.append("AWS_ASSUME_ROLE_ARN=")
 
     backend_cfg = metadata.get("backend")
     backend_lines: list[str] = []
