@@ -1,10 +1,13 @@
 provider "aws" {
   region = var.region
 
-  # Only assume a role when an ARN is provided. In CI we pass an empty string
-  # via -var to avoid double-assuming when the workflow already assumed a role.
-  assume_role {
-    role_arn = (var.assume_role_arn != null && var.assume_role_arn != "") ? var.assume_role_arn : ""
+  # Only include assume_role when a non-empty ARN is provided to avoid
+  # double-assuming in CI (where credentials are already assumed).
+  dynamic "assume_role" {
+    for_each = (var.assume_role_arn != null && var.assume_role_arn != "") ? [var.assume_role_arn] : []
+    content {
+      role_arn = assume_role.value
+    }
   }
 
   default_tags {
