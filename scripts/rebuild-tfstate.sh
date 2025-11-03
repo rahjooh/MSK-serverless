@@ -135,17 +135,11 @@ MSK_CONTROL_POLICY_NAME="$msk_control_policy_name_default"
 PRODUCER_POLICY_NAME="$producer_policy_name_default"
 CONSUMER_POLICY_NAME="$consumer_policy_name_default"
 
-BACKEND_ARGS=(
-  "-backend-config=bucket=${TF_BACKEND_BUCKET}"
-  "-backend-config=key=${TF_BACKEND_KEY}"
+terraform init -input=false -reconfigure \
+  "-backend-config=bucket=${TF_BACKEND_BUCKET}" \
+  "-backend-config=key=${TF_BACKEND_KEY}" \
   "-backend-config=region=${BACKEND_REGION}"
-)
 
-if [ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]; then
-  BACKEND_ARGS+=("-backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}")
-fi
-
-terraform init -input=false -reconfigure "${BACKEND_ARGS[@]}"
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
 if [ "$ACCOUNT_ID" = "None" ] || [ -z "$ACCOUNT_ID" ]; then

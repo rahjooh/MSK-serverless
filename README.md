@@ -208,7 +208,7 @@ If you set `assume_role_arn`, make sure the base credentials have permission to 
 5. **Securely pass variables and secrets**
    - Store environment-specific values in the `TERRAFORM_TFVARS` secret using the same HCL syntax that Terraform expects in a `.tfvars` file. Optional `# workflow.<key> = <value>` comments inside that payload let CI read GitHub-only settings (backend bucket, assume-role ARN, summary destinations) without introducing extra repository secrets.
 6. **Centralize Terraform state**
-   - Point Terraform at a remote backend (e.g., S3 with DynamoDB locking) so concurrent runs do not clash on local state.
+   - Point Terraform at a remote backend (for example, S3) so concurrent runs do not clash on local state.
    - Use separate backends or workspaces per environment and restrict who can trigger production applies.
 7. **Surface plan feedback**
    - Have the plan job comment on pull requests and schedule periodic plan-only runs for drift detection so you can spot unintended changes without applying.
@@ -232,7 +232,7 @@ supplying temporary credentials and (optionally) `AWS_REGION` to force a default
 
 Optional CI-only settings can be provided through comment directives that start with `# workflow.` or `// workflow.`. Supported directives include:
 
-- `workflow.backend.bucket`, `workflow.backend.key`, `workflow.backend.region`, `workflow.backend.dynamodb_table`
+- `workflow.backend.bucket`, `workflow.backend.key`, `workflow.backend.region`
 - `workflow.summary.bucket`, `workflow.summary.key`
 - `workflow.use_existing`
 

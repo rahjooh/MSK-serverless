@@ -16,6 +16,11 @@ env:
   PLAN_FILE: plan.out
   TF_VARS_FILE: ci.auto.tfvars
   TF_BACKEND_FILE: backend.auto.tfbackend
+  AWS_REGION: ${{ vars.AWS_REGION || '' }}
+  TF_BACKEND_BUCKET: ${{ vars.TF_BACKEND_BUCKET || vars.S3_BUCKET || '' }}
+  TF_BACKEND_REGION: ${{ vars.TF_BACKEND_REGION || vars.AWS_REGION || '' }}
+  TF_BACKEND_KEY: ${{ vars.TF_BACKEND_KEY || '' }}
+  S3_BUCKET: ${{ vars.S3_BUCKET || '' }}
 
 jobs:
   apply:
@@ -106,7 +111,7 @@ jobs:
               k, v = line.split('=', 1)
               k = k.strip()
               v = v.strip().strip('"')
-              if k in {'bucket','key','region','dynamodb_table'}:
+              if k in {'bucket','key','region'}:
                   kv[k] = v
           env_path = os.environ.get('GITHUB_ENV')
           if env_path:
@@ -117,8 +122,6 @@ jobs:
                       fh.write(f"TF_BACKEND_KEY={kv['key']}\n")
                   if 'region' in kv:
                       fh.write(f"TF_BACKEND_REGION={kv['region']}\n")
-                  if 'dynamodb_table' in kv:
-                      fh.write(f"TF_BACKEND_DYNAMODB_TABLE={kv['dynamodb_table']}\n")
           PY
 
       - name: Configure AWS credentials
@@ -160,7 +163,6 @@ jobs:
           if [ -n "${TF_BACKEND_BUCKET:-}" ] && [ -n "${TF_BACKEND_KEY:-}" ]; then \
             ARGS="-backend-config=bucket=${TF_BACKEND_BUCKET} -backend-config=key=${TF_BACKEND_KEY}"; \
             if [ -n "${REGION}" ]; then ARGS="$ARGS -backend-config=region=${REGION}"; fi; \
-            if [ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]; then ARGS="$ARGS -backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}"; fi; \
             make INIT_ARGS="$ARGS" init; \
           elif [ -s "${TF_BACKEND_FILE}" ]; then \
             if [ -n "${TF_BACKEND_REGION}" ]; then \

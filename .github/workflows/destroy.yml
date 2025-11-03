@@ -15,6 +15,11 @@ env:
   TF_WORKING_DIR: .
   TF_VARS_FILE: ci.auto.tfvars
   TF_BACKEND_FILE: backend.auto.tfbackend
+  AWS_REGION: ${{ vars.AWS_REGION || '' }}
+  TF_BACKEND_BUCKET: ${{ vars.TF_BACKEND_BUCKET || vars.S3_BUCKET || '' }}
+  TF_BACKEND_REGION: ${{ vars.TF_BACKEND_REGION || vars.AWS_REGION || '' }}
+  TF_BACKEND_KEY: ${{ vars.TF_BACKEND_KEY || '' }}
+  S3_BUCKET: ${{ vars.S3_BUCKET || '' }}
 
 jobs:
   destroy:
@@ -98,7 +103,7 @@ jobs:
               k, v = line.split('=', 1)
               k = k.strip()
               v = v.strip().strip('"')
-              if k in {'bucket','key','region','dynamodb_table'}:
+              if k in {'bucket','key','region'}:
                   kv[k] = v
           env_path = os.environ.get('GITHUB_ENV')
           if env_path:
@@ -109,8 +114,6 @@ jobs:
                       fh.write(f"TF_BACKEND_KEY={kv['key']}\n")
                   if 'region' in kv:
                       fh.write(f"TF_BACKEND_REGION={kv['region']}\n")
-                  if 'dynamodb_table' in kv:
-                      fh.write(f"TF_BACKEND_DYNAMODB_TABLE={kv['dynamodb_table']}\n")
           PY
 
       - name: Avoid double assume (clear TF_VAR_assume_role_arn when GH already assumed)
@@ -164,7 +167,6 @@ jobs:
               "-backend-config=bucket=${TF_BACKEND_BUCKET}" \
               "-backend-config=key=${TF_BACKEND_KEY}" )
             if [ -n "${REGION}" ]; then ARGS+=( "-backend-config=region=${REGION}" ); fi
-            if [ -n "${TF_BACKEND_DYNAMODB_TABLE:-}" ]; then ARGS+=( "-backend-config=dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}" ); fi
             terraform -chdir="${WORKDIR}" init "${ARGS[@]}"
           elif [ -s "${TF_BACKEND_FILE}" ]; then
             if [ -n "${REGION}" ]; then
@@ -197,7 +199,6 @@ jobs:
           TF_BACKEND_BUCKET: ${{ env.TF_BACKEND_BUCKET }}
           TF_BACKEND_KEY: ${{ env.TF_BACKEND_KEY }}
           TF_BACKEND_REGION: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}
-          TF_BACKEND_DYNAMODB_TABLE: ${{ env.TF_BACKEND_DYNAMODB_TABLE }}
           TF_VAR_vpc_id: ${{ env.TF_VAR_vpc_id }}
           TF_VAR_subnet_ids: ${{ env.TF_VAR_subnet_ids }}
           TF_VAR_region: ${{ env.TF_VAR_region || env.AWS_REGION_EFFECTIVE || env.AWS_REGION }}

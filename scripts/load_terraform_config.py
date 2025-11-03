@@ -423,20 +423,6 @@ def _indent(level: int) -> str:
     return "  " * level
 
 
-def _format_scalar(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if value is None:
-        return "null"
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return repr(value)
-    if isinstance(value, str):
-        return json.dumps(value)
-    raise TypeError(f"Unsupported scalar type: {type(value)!r}")
-
-def _indent(level: int) -> str:
-    return "  " * level
-
 def _format_list(value: list[Any], level: int) -> str:
     if not value:
         return "[]"
@@ -455,6 +441,7 @@ def _format_list(value: list[Any], level: int) -> str:
         lines.append(f"{rendered[-1]}{suffix}")
     lines.append(f"{_indent(level)}]")
     return "\n".join(lines)
+
 
 def _format_object(value: dict[str, Any], level: int) -> str:
     if not value:
@@ -537,6 +524,16 @@ def main() -> None:
 
     backend_cfg = metadata.get("backend")
     backend_lines: list[str] = []
+
+    def _string_from_tfvars(name: str) -> str | None:
+        value = tfvars.get(name)
+        if isinstance(value, str) and value:
+            return value
+        return None
+
+    backend_bucket: str | None = None
+    backend_key: str | None = None
+    backend_region: str | None = None
     if isinstance(backend_cfg, dict):
         for key, value in backend_cfg.items():
             if value is None:
@@ -549,14 +546,45 @@ def main() -> None:
                 backend_lines.append(f"{key} = {value}")
             else:
                 backend_lines.append(f"{key} = {json.dumps(value)}")
+
+            lowered = key.lower()
+            if lowered == "bucket" and isinstance(value, str) and value:
+                backend_bucket = value
+            elif lowered == "key" and isinstance(value, str) and value:
+                backend_key = value
+            elif lowered == "region" and isinstance(value, str) and value:
+                backend_region = value
         if backend_lines:
             _ensure_parent(backend_file)
             backend_file.write_text("\n".join(backend_lines) + "\n", encoding="utf-8")
             env_lines.append(f"TF_BACKEND_FILE={backend_file}")
-            for key in ("bucket", "key", "region", "dynamodb_table"):
-                val = backend_cfg.get(key)
-                if isinstance(val, str) and val:
-                    env_lines.append(f"TF_BACKEND_{key.upper()}={val}")
+
+    backend_bucket = (
+        backend_bucket
+        or _string_from_tfvars("TF_BACKEND_BUCKET")
+        or _string_from_tfvars("S3_BUCKET")
+        or os.environ.get("TF_BACKEND_BUCKET")
+        or os.environ.get("S3_BUCKET")
+    )
+    backend_key = (
+        backend_key
+        or _string_from_tfvars("TF_BACKEND_KEY")
+        or os.environ.get("TF_BACKEND_KEY")
+    )
+    backend_region = (
+        backend_region
+        or _string_from_tfvars("TF_BACKEND_REGION")
+        or os.environ.get("TF_BACKEND_REGION")
+        or os.environ.get("AWS_REGION")
+    )
+
+    if backend_bucket:
+        env_lines.append(f"TF_BACKEND_BUCKET={backend_bucket}")
+        env_lines.append(f"S3_BUCKET={backend_bucket}")
+    if backend_key:
+        env_lines.append(f"TF_BACKEND_KEY={backend_key}")
+    if backend_region:
+        env_lines.append(f"TF_BACKEND_REGION={backend_region}")
 
     summary_cfg = metadata.get("summary")
     if isinstance(summary_cfg, dict):
