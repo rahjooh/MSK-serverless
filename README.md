@@ -89,7 +89,7 @@ This stack is designed for **high-frequency, small messages** (e.g., order book 
 - AWS provider **≥ 5.70** (required for MSK Serverless `logging_info`)
 - An **existing VPC** with **2+ subnets** in different AZs (recommended: private subnets)
 - AWS credentials with permissions to create MSK, CloudWatch Logs, IAM roles/policies, and SG rules
-- Credentials capable of assuming the `MSK-Builder` role in `ap-south-1` (the provider now assumes this role automatically)
+- Credentials capable of assuming the `MSK-Builder` role in `eu-south-1` (the provider now assumes this role automatically)
 
 > If you only have a default VPC, you can still use it for development. For production, use a dedicated VPC with private subnets and NAT egress for EC2 collectors to reach exchanges.
 
@@ -122,7 +122,7 @@ Resource names now live in [`naming.yml`](./naming.yml). Terraform loads the fil
 ### Example `example.tfvars`
 
 ```hcl
-region     = "ap-south-1"
+region     = "eu-south-1"
 vpc_id     = "vpc-0abc1234"
 subnet_ids = ["subnet-0aaa...", "subnet-0bbb..."]
 
@@ -165,7 +165,7 @@ One convenient CLI profile that handles the MFA prompt and role chaining:
 
 ```ini
 [profile msk-builder]
-region = ap-south-1
+region = eu-south-1
 role_arn = arn:aws:iam::64..:role/MSK-Builder
 source_profile = hadi
 ```
@@ -193,7 +193,7 @@ If you set `assume_role_arn`, make sure the base credentials have permission to 
 
 ## CI/CD (GitHub Actions)
 
-> Mirror these recommendations in whatever CI/CD platform you use. They assume GitHub-hosted runners with AWS federation via OIDC.
+> Mirror these recommendations in whatever CI/CD platform you use. They assume GitHub-hosted runners with AWS credentials injected through encrypted secrets (static keys or temporary session tokens) and an optional STS role assumption.
 
 1. **Pin toolchain versions**
    - Install Terraform ≥ 1.6 and the AWS provider ≥ 5.70/5.100 explicitly so workflow runs stay compatible with this configuration.
@@ -202,9 +202,9 @@ If you set `assume_role_arn`, make sure the base credentials have permission to 
    - Upload the generated plan as an artifact for review.
 3. **Require human approval before apply**
    - Keep `terraform apply` in a separate job that consumes the reviewed plan artifact and is gated by manual approval or protected environments.
-4. **Rely on short-lived credentials**
-   - Configure GitHub’s OIDC provider to assume the existing `MSK-Builder` role instead of checking in long-lived AWS access keys.
-   - If environments use different roles, surface a variable such as `assume_role_arn` and feed it from environment or repository secrets.
+4. **Provide credentials via encrypted secrets**
+   - Store the AWS access key ID/secret (and session token, if using STS) as repository or environment secrets and let the workflows export them before running Terraform.
+   - If environments use different roles, surface a variable such as `assume_role_arn` and feed it from environment or repository secrets; the workflows will assume that role after loading the base credentials.
 5. **Securely pass variables and secrets**
    - Store environment-specific values in the `TERRAFORM_TFVARS` secret using the same HCL syntax that Terraform expects in a `.tfvars` file. Optional `# workflow.<key> = <value>` comments inside that payload let CI read GitHub-only settings (backend bucket, assume-role ARN, summary destinations) without introducing extra repository secrets.
 6. **Centralize Terraform state**
@@ -227,6 +227,9 @@ The `.github/workflows/terraform.yml` pipeline implements the guidance above wit
 
 To feed environment-specific variables, store the exact contents of your `.tfvars` file in the encrypted `TERRAFORM_TFVARS` secret. The loader writes the payload to `ci.auto.tfvars` for Terraform and exports matching `TF_VAR_` environment variables for CLIs that prefer them. Because the payload is native HCL, you can copy it directly to `terraform.tfvars` for local runs.
 
+The workflows expect `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` to be defined as GitHub secrets. Set `AWS_SESSION_TOKEN` when
+supplying temporary credentials and (optionally) `AWS_REGION` to force a default region if your tfvars do not include one.
+
 Optional CI-only settings can be provided through comment directives that start with `# workflow.` or `// workflow.`. Supported directives include:
 
 - `workflow.backend.bucket`, `workflow.backend.key`, `workflow.backend.region`, `workflow.backend.dynamodb_table`
@@ -236,7 +239,7 @@ Optional CI-only settings can be provided through comment directives that start 
 Example secret value:
 
 ```hcl
-region          = "ap-south-1"
+region          = "eu-south-1"
 assume_role_arn = "arn:aws:iam::123456789012:role/MSK-Builder"
 
 vpc_id     = "vpc-0abc123def4567890"
@@ -260,7 +263,7 @@ log_kms_key_arn    = null
 
 # workflow.backend.bucket = "terraform-state-bucket"
 # workflow.backend.key    = "cluster/prod/terraform.tfstate"
-# workflow.backend.region = "ap-south-1"
+# workflow.backend.region = "eu-south-1"
 # workflow.summary.bucket = "msk-cluster-reports"
 # workflow.summary.key    = "terraform/cluster/resources.json"
 # workflow.use_existing   = true

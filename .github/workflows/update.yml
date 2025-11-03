@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -29,6 +28,23 @@ jobs:
         run: python3 scripts/load_terraform_config.py
         env:
           TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
+
+      - name: Ensure AWS access keys are provided
+        run: |
+          set -euo pipefail
+          missing=0
+          for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::Missing $var secret. Add it to the repository or environment secrets.";
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Validate backend config (skip invalid)
         if: ${{ hashFiles(env.TF_BACKEND_FILE) != '' }}
@@ -87,25 +103,28 @@ jobs:
                       fh.write(f"TF_BACKEND_DYNAMODB_TABLE={kv['dynamodb_table']}\n")
           PY
 
-      - name: Configure AWS credentials (assume role)
-        if: ${{ env.AWS_ASSUME_ROLE_ARN != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_ASSUME_ROLE_ARN }}
-          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE }}
-          role-duration-seconds: 3600
-          role-skip-session-tagging: true
-          aws-access-key-id: ''
-          aws-secret-access-key: ''
-          aws-session-token: ''
-
-      - name: Validate AWS credential configuration
-        if: ${{ env.AWS_ASSUME_ROLE_ARN == '' }}
+      - name: Avoid double assume (clear TF_VAR_assume_role_arn when GH already assumed)
+        if: ${{ env.ASSUME_ROLE_ARN != '' }}
         run: |
-          echo "::error::Set assume_role_arn in the TERRAFORM_TFVARS secret so the update workflow can assume AWS credentials."
+          {
+            echo "TF_VAR_assume_role_arn<<EOF";
+            echo "";
+            echo "EOF";
+          } >> "$GITHUB_ENV"
 
       - name: Show Terraform version
         run: terraform version
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.TF_BACKEND_REGION || env.AWS_REGION_EFFECTIVE || env.AWS_REGION || secrets.AWS_REGION }}
+          role-to-assume: ${{ env.ASSUME_ROLE_ARN || '' }}
+          role-duration-seconds: ${{ env.ASSUME_ROLE_ARN != '' && '3600' || '' }}
+          role-skip-session-tagging: true
 
       - name: Preflight AWS identity
         run: |
