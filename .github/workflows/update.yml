@@ -34,6 +34,18 @@ jobs:
         env:
           TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS }}
 
+      - name: Mask sensitive values
+        run: |
+          set -euo pipefail
+          mask() { local v="${!1:-}"; if [ -n "$v" ]; then echo "::add-mask::$v"; fi; }
+          for var in \
+            AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+            ASSUME_ROLE_ARN AWS_ASSUME_ROLE_ARN \
+            TF_VAR_vpc_id TF_VAR_subnet_ids \
+            TF_BACKEND_BUCKET TF_BACKEND_KEY S3_BUCKET; do
+            mask "$var" || true
+          done
+
       - name: Ensure AWS access keys are provided
         run: |
           set -euo pipefail

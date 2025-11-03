@@ -204,13 +204,10 @@ fi
 
 COLLECTOR_RULE_ID=""
 if ! is_missing "$MSK_BROKER_SG_ID" && ! is_missing "$COLLECTOR_SG_ID"; then
-  COLLECTOR_RULE_ID=$(aws ec2 describe-security-group-rules \
-    --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
-              "Name=referenced-group-id,Values=${COLLECTOR_SG_ID}" \
-              "Name=ip-protocol,Values=tcp" \
-              "Name=from-port,Values=9098" \
-              "Name=to-port,Values=9098" \
-    --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
+COLLECTOR_RULE_ID=$(aws ec2 describe-security-group-rules \
+  --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
+  --query "SecurityGroupRules[?IpProtocol=='tcp' && FromPort==\`9098\` && ToPort==\`9098\` && ReferencedGroupInfo.GroupId=='${COLLECTOR_SG_ID}'].SecurityGroupRuleId | [0]" \
+  --output text)
   if is_missing "$COLLECTOR_RULE_ID"; then
     record_missing "security group ingress rule for collectors -> brokers"
   fi
@@ -218,13 +215,10 @@ fi
 
 CONSUMER_RULE_ID=""
 if ! is_missing "$MSK_BROKER_SG_ID" && ! is_missing "$CONSUMER_SG_ID"; then
-  CONSUMER_RULE_ID=$(aws ec2 describe-security-group-rules \
-    --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
-              "Name=referenced-group-id,Values=${CONSUMER_SG_ID}" \
-              "Name=ip-protocol,Values=tcp" \
-              "Name=from-port,Values=9098" \
-              "Name=to-port,Values=9098" \
-    --query 'SecurityGroupRules[0].SecurityGroupRuleId' --output text)
+CONSUMER_RULE_ID=$(aws ec2 describe-security-group-rules \
+  --filters "Name=group-id,Values=${MSK_BROKER_SG_ID}" \
+  --query "SecurityGroupRules[?IpProtocol=='tcp' && FromPort==\`9098\` && ToPort==\`9098\` && ReferencedGroupInfo.GroupId=='${CONSUMER_SG_ID}'].SecurityGroupRuleId | [0]" \
+  --output text)
   if is_missing "$CONSUMER_RULE_ID"; then
     record_missing "security group ingress rule for consumers -> brokers"
   fi
