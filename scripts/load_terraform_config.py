@@ -515,6 +515,18 @@ def _dump_tfvars(tfvars: dict[str, Any]) -> str:
 def main() -> None:
     raw = _load_secret()
     tfvars = _parse_tfvars(raw)
+    # Keep the original assume_role_arn for GH credential configuration,
+    # but scrub it from the generated tfvars file to prevent provider-level
+    # re-assume during CI runs where the workflow already assumes the role.
+    original_assume_role = tfvars.get("assume_role_arn")
+    if (
+        isinstance(original_assume_role, str)
+        and original_assume_role
+        and os.environ.get("GITHUB_ACTIONS") == "true"
+    ):
+        # Ensure subsequent Terraform CLI calls using -var-file do NOT pass a
+        # non-empty assume_role_arn to the provider.
+        tfvars["assume_role_arn"] = ""
     metadata = _parse_metadata(raw)
 
     tf_vars_file = Path(os.environ.get("TF_VARS_FILE", "ci.auto.tfvars"))
@@ -540,10 +552,10 @@ def main() -> None:
         env_lines.append(f"AWS_REGION={region}")
         env_lines.append(f"AWS_REGION_EFFECTIVE={region}")
 
-    assume_role = tfvars.get("assume_role_arn")
-    if isinstance(assume_role, str) and assume_role:
-        env_lines.append(f"ASSUME_ROLE_ARN={assume_role}")
-        env_lines.append(f"AWS_ASSUME_ROLE_ARN={assume_role}")
+    # Use the original (pre-scrubbed) value to drive GH credential assumption.
+    if isinstance(original_assume_role, str) and original_assume_role:
+        env_lines.append(f"ASSUME_ROLE_ARN={original_assume_role}")
+        env_lines.append(f"AWS_ASSUME_ROLE_ARN={original_assume_role}")
     # else:
     #     env_lines.append("ASSUME_ROLE_ARN=")
     #     env_lines.append("AWS_ASSUME_ROLE_ARN=")

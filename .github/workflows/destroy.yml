@@ -116,13 +116,15 @@ jobs:
                       fh.write(f"TF_BACKEND_REGION={kv['region']}\n")
           PY
 
-      - name: Avoid double assume (clear TF_VAR_assume_role_arn when GH already assumed)
+      - name: Avoid double assume (clear TF_VAR_assume_role_arn; override plan)
         if: ${{ env.ASSUME_ROLE_ARN != '' }}
         run: |
           {
             echo "TF_VAR_assume_role_arn<<EOF";
             echo "";
             echo "EOF";
+            # Ensure any terraform plan invocations ignore assume_role_arn from tfvars
+            echo "TF_CLI_ARGS_plan=-var=assume_role_arn=\"\"";
           } >> "$GITHUB_ENV"
 
       - name: Configure AWS credentials
