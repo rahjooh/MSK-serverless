@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -386,6 +388,29 @@ def _append_env(lines: list[str]) -> None:
                 handle.write("\n")
 
 
+def _format_with_terraform(path: Path) -> None:
+    """Run ``terraform fmt`` on ``path`` when the CLI is available."""
+
+    terraform = shutil.which("terraform")
+    if not terraform:
+        return
+    try:
+        subprocess.run(
+            [terraform, "fmt", str(path)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        details = ""
+        if isinstance(exc, subprocess.CalledProcessError):
+            details = exc.stderr.decode("utf-8", "ignore").strip()
+        message = f"Failed to format {path} with terraform fmt."
+        if details:
+            message = f"{message} Details: {details}"
+        print(f"::warning::{message}", file=sys.stderr)
+
+
 def _serialize_for_env(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -498,6 +523,7 @@ def main() -> None:
     _ensure_parent(tf_vars_file)
     formatted_tfvars = _dump_tfvars(tfvars)
     tf_vars_file.write_text(formatted_tfvars, encoding="utf-8")
+    _format_with_terraform(tf_vars_file)
 
     env_lines: list[str] = []
 
