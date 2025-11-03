@@ -423,23 +423,38 @@ def _indent(level: int) -> str:
     return "  " * level
 
 
+def _format_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    raise TypeError(f"Unsupported scalar type: {type(value)!r}")
+
+def _indent(level: int) -> str:
+    return "  " * level
+
 def _format_list(value: list[Any], level: int) -> str:
     if not value:
         return "[]"
     lines: list[str] = ["["]
-    for item in value:
+    last_index = len(value) - 1
+    for index, item in enumerate(value):
         rendered = _format_value(item, level + 1).splitlines()
         indent = _indent(level + 1)
+        suffix = "," if index != last_index else ""
         if len(rendered) == 1:
-            lines.append(f"{indent}{rendered[0]},")
+            lines.append(f"{indent}{rendered[0]}{suffix}")
             continue
         lines.append(f"{indent}{rendered[0]}")
         for inner in rendered[1:-1]:
             lines.append(inner)
-        lines.append(f"{rendered[-1]},")
+        lines.append(f"{rendered[-1]}{suffix}")
     lines.append(f"{_indent(level)}]")
     return "\n".join(lines)
-
 
 def _format_object(value: dict[str, Any], level: int) -> str:
     if not value:
