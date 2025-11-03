@@ -392,6 +392,99 @@ def _serialize_for_env(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
+def _needs_quotes(text: str) -> bool:
+    if not text:
+        return True
+    if not text[0].isalpha() and text[0] != "_":
+        return True
+    for ch in text:
+        if not (ch.isalnum() or ch == "_"):
+            return True
+    return False
+
+
+def _format_key(text: str) -> str:
+    return json.dumps(text) if _needs_quotes(text) else text
+
+
+def _format_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    raise TypeError(f"Unsupported scalar type: {type(value)!r}")
+
+
+def _indent(level: int) -> str:
+    return "  " * level
+
+
+def _format_list(value: list[Any], level: int) -> str:
+    if not value:
+        return "[]"
+    lines: list[str] = ["["]
+    for item in value:
+        rendered = _format_value(item, level + 1).splitlines()
+        indent = _indent(level + 1)
+        if len(rendered) == 1:
+            lines.append(f"{indent}{rendered[0]},")
+            continue
+        lines.append(f"{indent}{rendered[0]}")
+        for inner in rendered[1:-1]:
+            lines.append(inner)
+        lines.append(f"{rendered[-1]},")
+    lines.append(f"{_indent(level)}]")
+    return "\n".join(lines)
+
+
+def _format_object(value: dict[str, Any], level: int) -> str:
+    if not value:
+        return "{}"
+    lines: list[str] = ["{"]
+    keys = list(value.keys())
+    formatted_keys = [_format_key(str(key)) for key in keys]
+    padding = 0
+    if formatted_keys:
+        padding = max(len(key) for key in formatted_keys)
+    for original_key, formatted_key in zip(keys, formatted_keys):
+        rendered = _format_value(value[original_key], level + 1).splitlines()
+        indent = _indent(level + 1)
+        pad = " " * (padding - len(formatted_key))
+        prefix = f"{indent}{formatted_key}{pad} = "
+        if len(rendered) == 1:
+            lines.append(f"{prefix}{rendered[0]}")
+            continue
+        lines.append(f"{prefix}{rendered[0]}")
+        for inner in rendered[1:]:
+            lines.append(inner)
+    lines.append(f"{_indent(level)}}}")
+    return "\n".join(lines)
+
+
+def _format_value(value: Any, level: int = 0) -> str:
+    if isinstance(value, dict):
+        return _format_object(value, level)
+    if isinstance(value, list):
+        return _format_list(value, level)
+    return _format_scalar(value)
+
+
+def _dump_tfvars(tfvars: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for key, value in tfvars.items():
+        rendered = _format_value(value, 0).splitlines()
+        if not rendered:
+            continue
+        lines.append(f"{key} = {rendered[0]}")
+        for inner in rendered[1:]:
+            lines.append(inner)
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     raw = _load_secret()
     tfvars = _parse_tfvars(raw)
@@ -401,11 +494,8 @@ def main() -> None:
     backend_file = Path(os.environ.get("TF_BACKEND_FILE", "backend.auto.tfbackend"))
 
     _ensure_parent(tf_vars_file)
-    if not raw.endswith("\n"):
-        raw_to_write = raw + "\n"
-    else:
-        raw_to_write = raw
-    tf_vars_file.write_text(raw_to_write, encoding="utf-8")
+    formatted_tfvars = _dump_tfvars(tfvars)
+    tf_vars_file.write_text(formatted_tfvars, encoding="utf-8")
 
     env_lines: list[str] = []
 
